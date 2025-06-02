@@ -78,6 +78,8 @@ h1 {
     background: var(--container-bg);
     line-height: 1.6;
     transition: max-height 0.3s;
+    margin-top: 1rem;
+        margin-bottom: 3rem;
 }
 
 html.focus-mode #transcript {
@@ -601,4 +603,21 @@ html.dark-mode .tooltip-popup::after {
 .thickness-control .thickness-slider {
     max-width: 120px;
     /* Allow a bit more width for thickness slider if needed, but still constrained */
+}
+
+.playback-speed-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    /* Spacing within the timing group */
+}
+
+.slider-group label,
+.transcript-timing-group label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 500;
+    margin: 0;
 }

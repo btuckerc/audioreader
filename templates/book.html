@@ -68,7 +68,8 @@
 
       <div class="main-controls">
         <div class="main-controls-left">
-          <button onclick="location.href='{{ url_for('player', book=book) }}'">Player</button>
+          {# Player button removed, Reset button will be here if progress exists #}
+          <button id="resetBookProgressBtn" class="utility-button" style="display: none;">Reset Book Progress</button>
         </div>
         <div class="main-controls-right">
           <span id="whisperStatus" class="status-indicator">Whisper available</span>
@@ -107,6 +108,7 @@
       <pre></pre>
     </div>
 
+    <script src="{{ url_for('static', filename='js/book_page_actions.js') }}" defer></script>
     <script>
       const log = document.getElementById('log')
       const pre = log.querySelector('pre')
@@ -114,18 +116,19 @@
       let currentEstimates = {}
       let activeGenerations = new Set() // Keep track of active generation jobs by filename
       const bookName = document.querySelector('.container').dataset.book // Define bookName globally for this script
-      
+      let bookData = { files: {}, name: bookName }; // Initialized with name, files will be populated by refreshChapterList
+
       function toggleTranscriptionSettings() {
         const content = document.getElementById('transcriptionContent')
         const indicator = document.querySelector('.fold-indicator')
-      
+
         content.classList.toggle('expanded')
         indicator.classList.toggle('expanded')
-      
+
         // Save expansion state
         localStorage.setItem('transcriptionSettingsExpanded', content.classList.contains('expanded'))
       }
-      
+
       function saveTranscriptionSettings() {
         const settings = {
           word_timestamps: document.getElementById('wordTimestamps').checked,
@@ -137,7 +140,7 @@
         }
         localStorage.setItem('transcriptionSettings', JSON.stringify(settings))
       }
-      
+
       function loadTranscriptionSettings() {
         const saved = localStorage.getItem('transcriptionSettings')
         if (saved) {
@@ -153,7 +156,7 @@
             console.error('Error loading transcription settings:', e)
           }
         }
-      
+
         // Restore expansion state
         const expanded = localStorage.getItem('transcriptionSettingsExpanded') === 'true'
         if (expanded) {
@@ -163,7 +166,7 @@
           indicator.classList.add('expanded')
         }
       }
-      
+
       // Save settings when they change
       function setupSettingsListeners() {
         document.getElementById('wordTimestamps').addEventListener('change', saveTranscriptionSettings)
@@ -176,7 +179,7 @@
           updateButtonTimeIndicators() // Explicitly call this to update UI immediately
         })
       }
-      
+
       // Load Whisper capabilities - split for immediate cache check and deferred fresh fetch
       function tryLoadCachedWhisperCapabilities() {
         const sessionKey = 'cachedWhisperCapabilities'
@@ -185,30 +188,28 @@
           if (cached) {
             whisperCapabilities = JSON.parse(cached)
             updateCapabilityUI() // Update UI with cached data immediately
-            // console.log('Loaded whisper capabilities from cache.');
           }
         } catch (e) {
           console.warn('Failed to load cached whisper capabilities', e)
           whisperCapabilities = null // Ensure it's null if cache is bad
         }
       }
-      
+
       async function fetchFreshWhisperCapabilities() {
         const sessionKey = 'cachedWhisperCapabilities'
         try {
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 3000)
-      
+
           const response = await fetch('/api/whisper/capabilities', {
             signal: controller.signal
           })
           clearTimeout(timeoutId)
-      
+
           if (response.ok) {
             const freshCapabilities = await response.json()
             whisperCapabilities = freshCapabilities
             updateCapabilityUI() // Update UI with fresh data
-            // console.log('Fetched fresh whisper capabilities.');
             try {
               sessionStorage.setItem(sessionKey, JSON.stringify(freshCapabilities))
             } catch (e) {
@@ -216,17 +217,14 @@
             }
           } else if (!whisperCapabilities) {
             setDefaultCapabilities()
-            // console.log('Fetch failed, no cache, using default capabilities.');
           }
         } catch (error) {
           if (!whisperCapabilities) {
             setDefaultCapabilities()
-            // console.log('Fetch error, no cache, using default capabilities.');
           }
-          // console.warn('Failed to fetch fresh whisper capabilities:', error);
         }
       }
-      
+
       function setDefaultCapabilities() {
         whisperCapabilities = {
           installed: true, // Assume true if API fails, can be updated later
@@ -235,16 +233,16 @@
         }
         updateCapabilityUI()
       }
-      
+
       function updateCapabilityUI() {
         const wordTimestampsStatus = document.getElementById('wordTimestampsStatus')
         const highlightingStatus = document.getElementById('highlightingStatus')
         const whisperStatus = document.getElementById('whisperStatus')
         const wordTimestampsCheckbox = document.getElementById('wordTimestamps')
         const highlightingCheckbox = document.getElementById('highlighting')
-      
+
         if (!whisperCapabilities) return
-      
+
         // Update status indicators
         if (whisperCapabilities.installed) {
           whisperStatus.textContent = 'Whisper available'
@@ -253,7 +251,7 @@
           whisperStatus.textContent = 'Whisper not found'
           whisperStatus.className = 'status-indicator capability-unavailable'
         }
-      
+
         if (whisperCapabilities.word_timestamps_available) {
           wordTimestampsStatus.textContent = 'AVAILABLE'
           wordTimestampsStatus.className = 'capability-status capability-available'
@@ -263,7 +261,7 @@
           wordTimestampsCheckbox.disabled = true
           wordTimestampsCheckbox.checked = false
         }
-      
+
         if (whisperCapabilities.highlight_words_available) {
           highlightingStatus.textContent = 'AVAILABLE'
           highlightingStatus.className = 'capability-status capability-available'
@@ -273,7 +271,7 @@
           highlightingCheckbox.disabled = true
           highlightingCheckbox.checked = false
         }
-      
+
         // Disable highlighting if word timestamps aren't available
         function updateHighlightingState() {
           const wordTimestampsEnabled = wordTimestampsCheckbox.checked && !wordTimestampsCheckbox.disabled
@@ -284,11 +282,11 @@
             highlightingCheckbox.disabled = false
           }
         }
-      
+
         wordTimestampsCheckbox.addEventListener('change', updateHighlightingState)
         updateHighlightingState()
       }
-      
+
       function getTranscriptionOptions() {
         const highlightState = document.getElementById('highlighting').checked
         return {
@@ -299,30 +297,30 @@
           max_workers: parseInt(document.getElementById('maxWorkers').value) || 2
         }
       }
-      
+
       function toggleEstimates() {
         const content = document.getElementById('estimatesContent')
         const indicator = document.getElementById('estimatesIndicator')
-      
+
         content.classList.toggle('expanded')
         indicator.classList.toggle('expanded')
       }
-      
+
       // Helper function for parallel time calculation
       function calculateParallelTotalTime(pendingFileEstimatesSeconds, numWorkersInput) {
         const numWorkers = Math.max(1, parseInt(numWorkersInput) || 1)
-      
+
         if (!pendingFileEstimatesSeconds || pendingFileEstimatesSeconds.length === 0) {
           return 0
         }
-      
+
         if (numWorkers === 1) {
           return pendingFileEstimatesSeconds.reduce((sum, t) => sum + t, 0)
         }
-      
+
         const sortedTasks = [...pendingFileEstimatesSeconds].sort((a, b) => b - a)
         const workerFinishTimes = new Array(numWorkers).fill(0)
-      
+
         for (const taskTime of sortedTasks) {
           let earliestWorkerIndex = 0
           for (let i = 1; i < numWorkers; i++) {
@@ -334,37 +332,37 @@
         }
         return Math.max(...workerFinishTimes)
       }
-      
+
       function showEstimates(estimates) {
         const estimatesContent = document.getElementById('estimatesContent')
         const totalTimeInfo = document.getElementById('totalTimeInfo')
-      
+
         estimatesContent.innerHTML = '' // Clear previous estimates
-      
+
         if (estimates && typeof estimates === 'object' && Object.keys(estimates).length > 0) {
           for (const [filename, info] of Object.entries(estimates)) {
             if (typeof info.estimated_time !== 'number') continue
-      
+
             const item = document.createElement('div')
             item.className = 'estimate-item'
-      
+
             const nameSpan = document.createElement('span')
             nameSpan.className = 'estimate-filename'
             nameSpan.textContent = filename
-      
+
             const timeSpan = document.createElement('span')
             timeSpan.className = 'estimate-time'
-      
+
             const minutes = Math.ceil(info.estimated_time / 60)
             const hours = Math.floor(minutes / 60)
             const remainingMinutes = minutes % 60
-      
+
             if (hours > 0) {
               timeSpan.textContent = `~${hours}h ${remainingMinutes}m`
             } else {
               timeSpan.textContent = `~${minutes}m`
             }
-      
+
             item.appendChild(nameSpan)
             item.appendChild(timeSpan)
             estimatesContent.appendChild(item)
@@ -373,7 +371,7 @@
           // Optionally, display a message if there are no estimates
           // estimatesContent.textContent = 'No estimates available.';
         }
-      
+
         // Show total time, considering parallel processing
         let allFileTimesSeconds = []
         if (estimates && typeof estimates === 'object') {
@@ -381,27 +379,27 @@
             .filter((info) => typeof info.estimated_time === 'number')
             .map((info) => info.estimated_time)
         }
-      
+
         let totalEffectiveTimeSeconds = 0
         if (allFileTimesSeconds.length > 0) {
           const parallelCheckbox = document.getElementById('parallelProcessing')
           const workersInput = document.getElementById('maxWorkers')
-      
+
           // Ensure elements exist before accessing properties
           const isParallel = parallelCheckbox ? parallelCheckbox.checked : false
           const numWorkers = workersInput ? parseInt(workersInput.value) || 1 : 1
-      
+
           if (isParallel && numWorkers > 1) {
             totalEffectiveTimeSeconds = calculateParallelTotalTime(allFileTimesSeconds, numWorkers)
           } else {
             totalEffectiveTimeSeconds = allFileTimesSeconds.reduce((sum, t) => sum + t, 0)
           }
         }
-      
+
         const totalMinutes = Math.ceil(totalEffectiveTimeSeconds / 60)
         const totalHours = Math.floor(totalMinutes / 60)
         const totalRemainingMinutes = totalMinutes % 60
-      
+
         let totalText = 'Full Book Estimate (at current speed): '
         if (totalHours > 0) {
           totalText += `~${totalHours}h ${totalRemainingMinutes}m`
@@ -416,17 +414,17 @@
         }
         totalTimeInfo.textContent = totalText
       }
-      
+
       function updateButtonTimeIndicators() {
         const showTimeEstimates = document.getElementById('showTimeEstimates').checked
-      
+
         if (!currentEstimates || !showTimeEstimates) {
           document.querySelectorAll('.button-time-indicator').forEach((indicator) => {
             indicator.textContent = ''
           })
           return
         }
-      
+
         document.querySelectorAll('button[data-file] .button-time-indicator').forEach((indicator) => {
           const button = indicator.closest('button')
           const filename = button.dataset.file
@@ -443,7 +441,7 @@
             indicator.textContent = ''
           }
         })
-      
+
         const generateAllTimeIndicator = document.getElementById('generateAllTime')
         if (generateAllTimeIndicator) {
           let pendingFileTimesSeconds = []
@@ -456,27 +454,27 @@
               }
             }
           })
-      
+
           let totalEffectiveTimeSecondsForPending = 0
           if (pendingFileTimesSeconds.length > 0) {
             const parallelCheckbox = document.getElementById('parallelProcessing')
             const workersInput = document.getElementById('maxWorkers')
-      
+
             const isParallel = parallelCheckbox ? parallelCheckbox.checked : false
             const numWorkers = workersInput ? parseInt(workersInput.value) || 1 : 1
-      
+
             if (isParallel && numWorkers > 1) {
               totalEffectiveTimeSecondsForPending = calculateParallelTotalTime(pendingFileTimesSeconds, numWorkers)
             } else {
               totalEffectiveTimeSecondsForPending = pendingFileTimesSeconds.reduce((sum, t) => sum + t, 0)
             }
           }
-      
+
           if (totalEffectiveTimeSecondsForPending > 0) {
             const totalMinutes = Math.ceil(totalEffectiveTimeSecondsForPending / 60)
             const totalHours = Math.floor(totalMinutes / 60)
             const remainingMinutes = totalMinutes % 60
-      
+
             if (totalHours > 0) {
               generateAllTimeIndicator.textContent = `(~${totalHours}h ${remainingMinutes}m)`
             } else {
@@ -487,22 +485,22 @@
           }
         }
       }
-      
+
       async function runSpeedTest() {
         const button = document.getElementById('speedTestBtn')
         const resultDisplay = document.getElementById('speedTestResult')
         const estimatesSection = document.getElementById('estimatesSection')
-      
+
         button.disabled = true
         button.textContent = 'Testing...'
         resultDisplay.textContent = ''
         resultDisplay.className = '' // Clear previous status class
         estimatesSection.style.display = 'none'
         currentEstimates = {} // Clear current estimates before test
-      
+
         try {
           const currentUiSettings = getTranscriptionOptions() // word_timestamps, highlighting, parallel, max_workers
-      
+
           // Fetch file info for the current book to send to the backend for on-the-fly estimate calculation
           resultDisplay.textContent = 'Loading file information for test...'
           const fileInfoResponse = await fetch(`/api/book/${bookName}/file-info`)
@@ -515,7 +513,7 @@
           if (Object.keys(bookFileInfoData).length === 0) {
             throw new Error('No audio files found in this book to base test on or estimate for.')
           }
-      
+
           resultDisplay.textContent = 'Running speed test...'
           const response = await fetch('/api/whisper/speed-test', {
             method: 'POST',
@@ -531,17 +529,17 @@
               file_info: bookFileInfoData // For backend to calculate current book estimates
             })
           })
-      
+
           const data = await response.json()
-      
+
           if (data.success && data.speed_ratio > 0) {
             const speedRatio = parseFloat(data.speed_ratio).toFixed(1)
             const modelTested = data.model_tested || 'unknown_model'
             // const settingsTestedInfo = data.settings_tested_key_info || {}; // Can use this for more detailed display if needed
-      
+
             resultDisplay.textContent = `Speed (${modelTested}): ${speedRatio}x realtime (New test)`
             resultDisplay.className = 'speed-success'
-      
+
             if (data.estimates && Object.keys(data.estimates).length > 0) {
               currentEstimates = data.estimates // These are fresh for the current book
               showEstimates(currentEstimates)
@@ -570,7 +568,7 @@
           button.textContent = 'Test Speed'
         }
       }
-      
+
       // Load saved speed ratio on page load - split for immediate cache and deferred fresh fetch
       function tryLoadCachedSpeedResults() {
         const speedTestResultDisplay = document.getElementById('speedTestResult')
@@ -580,7 +578,7 @@
         const bookName = bookNameElement ? bookNameElement.dataset.book : ''
         const currentModelName = '{{ current_model_name }}' // Simplified initialization
         const cacheKey = `cachedSpeedResults_${bookName}_${currentModelName}`
-      
+
         try {
           const cachedData = sessionStorage.getItem(cacheKey)
           if (cachedData) {
@@ -595,7 +593,6 @@
               updateButtonTimeIndicators()
               if (estimatesSection) estimatesSection.style.display = 'block'
               if (timeEstimatesToggle) timeEstimatesToggle.style.display = 'block'
-              // console.log('Loaded speed results from cache.');
               return true // Indicate cache was successfully used
             } else {
               currentEstimates = {}
@@ -607,7 +604,7 @@
         }
         return false // Indicate cache was not used or was invalid
       }
-      
+
       async function fetchFreshSpeedResults() {
         const speedTestResultDisplay = document.getElementById('speedTestResult')
         const estimatesSection = document.getElementById('estimatesSection')
@@ -620,25 +617,25 @@
         if (speedTestResultDisplay && speedTestResultDisplay.textContent === 'Using cached speed estimate...') {
           usedCacheForInitialDisplay = true
         }
-      
+
         try {
           if (!usedCacheForInitialDisplay && speedTestResultDisplay) {
             speedTestResultDisplay.textContent = 'Loading saved speed estimate...'
             speedTestResultDisplay.className = ''
           }
-      
+
           const uiSettings = getTranscriptionOptions()
           const params = new URLSearchParams({
             model: currentModelName,
             word_timestamps: uiSettings.word_timestamps,
             highlighting: uiSettings.highlighting
           })
-      
+
           const response = await fetch(`/api/speed-ratio?${params.toString()}`)
           let usableSpeedRatio = 0
           let estimateSourceInfo = 'No saved speed estimate found for current configuration.'
           let sourceInfoClass = ''
-      
+
           if (response.ok) {
             const data = await response.json()
             if (data && data.speed_ratio > 0) {
@@ -661,7 +658,7 @@
             speedTestResultDisplay.textContent = estimateSourceInfo
             speedTestResultDisplay.className = sourceInfoClass
           }
-      
+
           let freshEstimates = {}
           if (usableSpeedRatio > 0) {
             const fileInfoResponse = await fetch(`/api/book/${bookName}/file-info`)
@@ -677,10 +674,9 @@
               }
             }
           }
-      
+
           currentEstimates = freshEstimates
-          // console.log('Fetched fresh speed results.');
-      
+
           if (Object.keys(currentEstimates).length > 0) {
             showEstimates(currentEstimates)
             updateButtonTimeIndicators()
@@ -707,7 +703,7 @@
           }
         }
       }
-      
+
       // Unified Dark Mode Management
       function toggleDarkMode() {
         const oldIsDarkMode = document.body.classList.contains('dark-mode')
@@ -715,7 +711,7 @@
         const newIsDarkMode = document.body.classList.contains('dark-mode')
         localStorage.setItem('siteWideDarkMode', newIsDarkMode)
         updateDarkModeButton()
-      
+
         // Player settings default color synchronization
         try {
           let playerSettings = JSON.parse(localStorage.getItem('playerSettings'))
@@ -732,9 +728,9 @@
               currentLineOutline: '#ffffff',
               currentLineThickness: 0 // Default thickness is 0 (no outline)
             }
-      
+
             let changed = false
-      
+
             // Check highlightColor
             if (!oldIsDarkMode && playerSettings.highlightColor === lightDefaults.highlightColor) {
               playerSettings.highlightColor = darkDefaults.highlightColor
@@ -743,7 +739,7 @@
               playerSettings.highlightColor = lightDefaults.highlightColor
               changed = true
             }
-      
+
             // Check currentLineBg
             if (!oldIsDarkMode && playerSettings.currentLineBg === lightDefaults.currentLineBg) {
               playerSettings.currentLineBg = darkDefaults.currentLineBg
@@ -752,7 +748,7 @@
               playerSettings.currentLineBg = lightDefaults.currentLineBg
               changed = true
             }
-      
+
             // Check currentLineOutline and thickness (only update if both color and thickness were default)
             const playerOutlineThickness = parseInt(playerSettings.currentLineThickness) || 0
             if (!oldIsDarkMode && playerSettings.currentLineOutline === lightDefaults.currentLineOutline && playerOutlineThickness === lightDefaults.currentLineThickness) {
@@ -764,25 +760,24 @@
               playerSettings.currentLineThickness = lightDefaults.currentLineThickness // Ensure thickness also resets
               changed = true
             }
-      
+
             if (changed) {
               localStorage.setItem('playerSettings', JSON.stringify(playerSettings))
-              // console.log('Player settings updated for new theme defaults.');
             }
           }
         } catch (e) {
           console.error('Error updating player settings for theme change:', e)
         }
-      
+
         // Broadcast to other tabs/windows
         window.postMessage({ type: 'darkModeChange', darkMode: newIsDarkMode }, '*')
       }
-      
+
       function updateDarkModeButton() {
         const button = document.querySelector('.mode-controls button')
         button.textContent = document.body.classList.contains('dark-mode') ? 'Light' : 'Dark'
       }
-      
+
       function applySiteWideDarkMode() {
         const isDarkMode = localStorage.getItem('siteWideDarkMode') === 'true'
         if (isDarkMode) {
@@ -792,7 +787,7 @@
         }
         updateDarkModeButton()
       }
-      
+
       // Listen for dark mode changes from other tabs
       window.addEventListener('message', function (event) {
         if (event.data.type === 'darkModeChange') {
@@ -804,23 +799,23 @@
           updateDarkModeButton()
         }
       })
-      
+
       // Listen for storage changes (for cross-tab sync)
       window.addEventListener('storage', function (event) {
         if (event.key === 'siteWideDarkMode') {
           applySiteWideDarkMode()
         }
       })
-      
+
       function openLog() {
         log.style.display = 'flex'
         pre.scrollTop = pre.scrollHeight
       }
-      
+
       function hideLog() {
         log.style.display = 'none'
       }
-      
+
       function saveLog() {
         const a = document.createElement('a')
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -828,19 +823,18 @@
         a.href = URL.createObjectURL(new Blob([pre.textContent], { type: 'text/plain' }))
         a.click()
       }
-      
+
       function genOne(buttonEl) {
         const file = buttonEl.dataset.file
         if (activeGenerations.has(file)) {
-          // console.log('Generation already in progress for:', file)
           return
         }
-      
+
         activeGenerations.add(file)
         buttonEl.disabled = true
         const originalButtonHTML = buttonEl.innerHTML // Store full HTML for spinner
         buttonEl.innerHTML = '<span class="spinner"></span> Generating...'
-      
+
         const listItem = buttonEl.closest('li')
         let statusSpan = listItem.querySelector('.file-info .generation-status-indicator')
         if (!statusSpan) {
@@ -856,12 +850,12 @@
         }
         statusSpan.textContent = '[generating...]'
         statusSpan.style.display = 'inline' // Ensure it's visible
-      
+
         if (document.getElementById('showDebugLog').checked) {
           openLog()
         }
         pre.textContent = `Starting transcription for ${file}...\n`
-      
+
         const options = getTranscriptionOptions()
         const payload = {
           book: bookName,
@@ -871,18 +865,17 @@
           parallel_processing: options.parallel_processing,
           max_workers: options.max_workers
         }
-      
+
         // Target /gen_one with POST and JSON body
         stream('/gen_one', file, buttonEl, originalButtonHTML, statusSpan, payload)
       }
-      
+
       async function genAll() {
         const generateAllBtn = document.getElementById('generateAllBtn')
         if (generateAllBtn.disabled) {
-          // console.log('Generate ALL operation already in progress.')
           return
         }
-      
+
         const chapterListItems = document.querySelectorAll('ul li')
         const filesToGenerate = []
         chapterListItems.forEach((item) => {
@@ -892,7 +885,7 @@
             filesToGenerate.push(button.dataset.file)
           }
         })
-      
+
         if (filesToGenerate.length === 0) {
           pre.textContent = 'All chapters seem to be transcribed or are currently processing.\n'
           if (document.getElementById('showDebugLog').checked) {
@@ -900,7 +893,7 @@
           }
           return
         }
-      
+
         if (document.getElementById('showDebugLog').checked) {
           openLog()
         }
@@ -908,9 +901,9 @@
         generateAllBtn.disabled = true
         const originalGenAllText = generateAllBtn.innerHTML
         generateAllBtn.innerHTML = '<span class="spinner"></span> Generating All...'
-      
+
         activeGenerations.add('all_files') // Use a special key for genAll
-      
+
         const options = getTranscriptionOptions()
         const payload_all = {
           book: bookName,
@@ -919,12 +912,12 @@
           parallel_processing: options.parallel_processing,
           max_workers: options.max_workers
         }
-      
+
         // Target /gen_all with POST and JSON body
         // For genAll, we don't pass individual buttonEl. Stream will call refreshChapterList.
         stream('/gen_all', 'all_files', generateAllBtn, originalGenAllText, null, payload_all)
       }
-      
+
       async function stream(url, filename, buttonEl = null, originalButtonHTML = 'Generate', statusSpanEl = null, payload = null) {
         let isGenAll = filename === 'all_files'
         try {
@@ -932,7 +925,7 @@
             openLog()
           }
           pre.textContent += `\nConnecting to stream for ${filename}...\n`
-      
+
           const fetchOptions = {
             method: 'POST',
             headers: {
@@ -940,16 +933,16 @@
             },
             body: JSON.stringify(payload)
           }
-      
+
           const response = await fetch(url, fetchOptions)
           if (!response.ok) {
             const errorText = await response.text()
             throw new Error(`Server error: ${response.status} ${response.statusText}. ${errorText}`)
           }
-      
+
           const reader = response.body.getReader()
           const decoder = new TextDecoder()
-      
+
           if (isGenAll) {
             document.querySelectorAll('#chapterList li').forEach((item) => {
               const fileStatusIndicator = item.querySelector('.file-info .generation-status-indicator')
@@ -959,7 +952,7 @@
               }
             })
           }
-      
+
           let done = false
           while (!done) {
             const { done: chunkDone, value } = await reader.read()
@@ -972,7 +965,7 @@
             pre.textContent += chunk
             pre.scrollTop = pre.scrollHeight // Auto-scroll log
           }
-      
+
           pre.textContent += `\nStream processing complete for ${filename}. Refreshing list...\n`
           await refreshChapterList(false) // Pass false to not force scroll restoration here, let finally block handle it if needed
         } catch (error) {
@@ -999,12 +992,12 @@
           }
         }
       }
-      
+
       async function refreshChapterList(restoreScroll = true) {
         const scrollPosition = window.scrollY
         const listElement = document.getElementById('chapterList')
         if (!listElement) return
-      
+
         try {
           const response = await fetch(`/api/book/${bookName}/file-info`)
           if (!response.ok) {
@@ -1012,25 +1005,27 @@
             listElement.innerHTML = '<li>Error loading chapter list.</li>'
             return
           }
-          const fileInfoData = await response.json()
-      
+          const fileInfoData = await response.json();
+          bookData.files = fileInfoData; // CORRECTLY assign fileInfoData here
+          // bookData.name is already set from bookName at initialization
+
           listElement.innerHTML = '' // Clear current list
-      
+
           for (const filename in fileInfoData) {
             const info = fileInfoData[filename]
             const listItem = document.createElement('li')
             listItem.dataset.filename = filename
-      
+
             const fileInfoDiv = document.createElement('div')
             fileInfoDiv.className = 'file-info'
-      
+
             if (info.job_running || activeGenerations.has(filename)) {
               const statusIndicator = document.createElement('span')
               statusIndicator.className = 'generation-status-indicator run'
               statusIndicator.textContent = activeGenerations.has(filename) && !info.job_running ? '[queued/generating client]' : '[transcribing server]'
               fileInfoDiv.appendChild(statusIndicator)
             }
-      
+
             const nameSpan = document.createElement('span')
             if (info.vtt_exists) {
               const link = document.createElement('a')
@@ -1042,10 +1037,10 @@
               fileInfoDiv.appendChild(nameSpan)
             }
             listItem.appendChild(fileInfoDiv)
-      
+
             const fileActionsDiv = document.createElement('div')
             fileActionsDiv.className = 'file-actions'
-      
+
             if (info.vtt_exists) {
               const statusInfoDiv = document.createElement('div')
               statusInfoDiv.className = 'file-status-info'
@@ -1066,12 +1061,12 @@
               button.onclick = function () {
                 genOne(this)
               }
-      
+
               const timeIndicatorSpan = document.createElement('span')
               timeIndicatorSpan.className = 'button-time-indicator'
               timeIndicatorSpan.dataset.file = filename // For updateButtonTimeIndicators
               button.appendChild(timeIndicatorSpan)
-      
+
               button.append('Generate') // Add text node after span
               fileActionsDiv.appendChild(button)
             } else {
@@ -1082,7 +1077,7 @@
             listItem.appendChild(fileActionsDiv)
             listElement.appendChild(listItem)
           }
-      
+
           updateButtonTimeIndicators() // Uses currentEstimates which should be up-to-date
           highlightCurrentChapter() // Re-apply highlighting
           syncActiveGenerationsWithUI(fileInfoData) // Sync client-side generation status with new DOM & server reality
@@ -1095,7 +1090,7 @@
           }
         }
       }
-      
+
       // Chapter progress tracking
       function saveCurrentChapter(book, chapter) {
         const progress = {
@@ -1105,7 +1100,7 @@
         }
         localStorage.setItem('chapterProgress', JSON.stringify(progress))
       }
-      
+
       function loadCurrentChapter() {
         const saved = localStorage.getItem('chapterProgress')
         if (saved) {
@@ -1123,7 +1118,7 @@
         }
         return null
       }
-      
+
       function highlightCurrentChapter() {
         const currentChapter = loadCurrentChapter()
         if (currentChapter) {
@@ -1131,15 +1126,15 @@
           const container = document.querySelector('.container')
           const existingResume = document.getElementById('resumeSection')
           const resumeLinkUrl = '/player/' + encodeURIComponent(bookName) + '?file=' + encodeURIComponent(currentChapter)
-      
+
           if (!existingResume) {
             const resumeSection = document.createElement('div')
             resumeSection.id = 'resumeSection' // ID for CSS targeting
-      
+
             const resumeLinkWrapper = document.createElement('a')
             resumeLinkWrapper.href = resumeLinkUrl
             resumeLinkWrapper.className = 'resume-link-wrapper' // For styling the link area
-      
+
             const resumeTextContent = document.createElement('div')
             resumeTextContent.className = 'resume-text-content' // Class for styling text
             resumeTextContent.innerHTML = `
@@ -1147,39 +1142,39 @@
                                                                       <span class="resume-subtitle">Continue from: ${currentChapter}</span>
                                                                   `
             resumeLinkWrapper.appendChild(resumeTextContent)
-      
+
             const resumeButton = document.createElement('button')
             resumeButton.textContent = 'Continue'
             resumeButton.className = 'resume-button'
             resumeButton.onclick = function () {
               window.location.href = resumeLinkUrl
             }
-      
+
             resumeSection.appendChild(resumeLinkWrapper)
             resumeSection.appendChild(resumeButton)
-      
+
             const mainControls = document.querySelector('.main-controls')
             if (mainControls && mainControls.parentNode) {
               mainControls.parentNode.insertBefore(resumeSection, mainControls.nextSibling)
             }
           }
-      
+
           // Highlight the current chapter in the list
           document.querySelectorAll('li').forEach((li) => {
             const link = li.querySelector('a')
             const span = li.querySelector('span')
             const filename = link ? decodeURIComponent(new URL(link.href).searchParams.get('file')) : span ? span.textContent : null
-      
+
             if (filename === currentChapter) {
               li.style.border = '2px solid var(--link-color)'
               li.style.backgroundColor = 'var(--current-bg)'
-      
+
               // Add a "Current" indicator (no emoji)
               if (!li.querySelector('.current-chapter-indicator')) {
                 const indicator = document.createElement('span')
                 indicator.className = 'current-chapter-indicator'
                 indicator.textContent = 'CURRENT'
-      
+
                 const fileActions = li.querySelector('.file-actions')
                 if (fileActions) {
                   fileActions.appendChild(indicator)
@@ -1189,23 +1184,15 @@
           })
         }
       }
-      
-      function syncActiveGenerationsWithServerState() {
-        // This function is now less critical if refreshChapterList correctly uses fileInfoData.job_running.
-        // However, it can still be useful to ensure buttons for client-side initiated jobs in activeGenerations
-        // (that might not yet be reflected on server if fileInfoData was fetched before job start) are disabled.
-        // We'll rename it and call it after list render.
-        console.warn('syncActiveGenerationsWithServerState is deprecated, use syncActiveGenerationsWithUI')
-      }
-      
+
       function syncActiveGenerationsWithUI(fileInfoData = null) {
         document.querySelectorAll('#chapterList li').forEach((item) => {
           const fileName = item.dataset.filename
           if (!fileName) return
-      
+
           const serverJobRunning = fileInfoData && fileInfoData[fileName] && fileInfoData[fileName].job_running
           const clientJobActive = activeGenerations.has(fileName)
-      
+
           if (clientJobActive && !serverJobRunning) {
             // Job was started by this client, not yet confirmed by server in this fileInfoData snapshot
             // Or server job finished but client set not updated.
@@ -1221,7 +1208,7 @@
               }
               statusIndicator.textContent = '[generating...]'
               statusIndicator.style.display = 'inline'
-      
+
               const btn = item.querySelector('.file-actions .generate-button')
               if (btn) {
                 btn.disabled = true
@@ -1235,68 +1222,80 @@
           }
         })
       }
-      
+
       // ULTRA-MINIMAL LOADING - Only show chapter list immediately
       document.addEventListener('DOMContentLoaded', function () {
         // Only apply dark mode - everything else deferred
         applySiteWideDarkMode()
-      
+
         // Everything else happens after the page is visible
         requestAnimationFrame(() => {
           setTimeout(initializeBookFeatures, 0)
         })
       })
-      
+
       function initializeBookFeatures() {
         // Load features in tiny chunks with longer delays
         tryLoadCachedWhisperCapabilities() // Check cache immediately
         tryLoadCachedSpeedResults() // Check speed results cache immediately
-      
-        // Initial population of the chapter list.
-        // Subsequent updates happen via genOne/genAll -> stream -> refreshChapterList
+
         refreshChapterList(true).then(() => {
           // These depend on the DOM being populated by refreshChapterList
-          setTimeout(() => {
-            try {
-              highlightCurrentChapter()
-            } catch (e) {
-              /* console.log('Chapter highlight failed:', e); */
-            }
-          }, 50) // Small delay after list render
-      
-          // syncActiveGenerationsWithUI is now called at the end of refreshChapterList
-        })
-      
+          // AND bookData.files being populated.
+
+          // REVERTED: Remove the setTimeout wrapper around highlightCurrentChapter
+          try {
+            highlightCurrentChapter();
+          } catch (e) {
+            /* console.log('Chapter highlight failed:', e); */
+          }
+
+          // Setup reset button listener HERE, after refreshChapterList has populated bookData
+          const resetButton = document.getElementById('resetBookProgressBtn');
+          if (resetButton) {
+              if (bookData && bookData.name && bookData.files && hasBookProgress(bookData.name, bookData.files)) {
+                  resetButton.style.display = 'inline-block'; // Or 'block' depending on desired layout
+                  resetButton.addEventListener('click', () => {
+                      // Check again inside listener in case state changed, though less likely here
+                      if (bookData && bookData.name && bookData.files) {
+                          confirmResetBookProgress(bookData.name, bookData.files);
+                      } else {
+                          alert('Book data became unavailable. Please refresh.');
+                      }
+                  });
+              } else {
+                  resetButton.style.display = 'none';
+              }
+          } else {
+              console.warn('[ResetProgress] Reset Book Progress button not found in initializeBookFeatures after refresh.');
+          }
+        });
+
         setTimeout(() => {
           try {
             loadTranscriptionSettings()
           } catch (e) {
-            // console.log('Settings load failed:', e);
           }
         }, 200)
-      
+
         setTimeout(() => {
           try {
             setupSettingsListeners()
           } catch (e) {
-            // console.log('Listeners setup failed:', e);
           }
         }, 300)
-      
+
         setTimeout(() => {
           try {
             fetchFreshWhisperCapabilities() // Fetch fresh data with a delay
           } catch (e) {
-            // console.error('Critical error in fetchFreshWhisperCapabilities:', e);
           }
         }, 500)
-      
+
         setTimeout(() => {
           try {
-            // fetchFreshSpeedResults also calls updateButtonTimeIndicators inside it.
             fetchFreshSpeedResults() // Fetch fresh speed results with a delay
           } catch (e) {
-            // console.error('Critical error in fetchFreshSpeedResults initialization:', e);
             const speedTestResultDisplay = document.getElementById('speedTestResult')
             if (speedTestResultDisplay && !speedTestResultDisplay.textContent.includes('cached')) {
               speedTestResultDisplay.textContent = 'Error loading estimates features.'

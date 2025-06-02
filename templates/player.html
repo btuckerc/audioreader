@@ -12,7 +12,6 @@
             document.documentElement.classList.add('dark-mode')
           }
         } catch (e) {
-          // console.warn('FOUC pre-load script failed:', e); // Intentionally kept commented
         }
       })()
     </script>
@@ -45,6 +44,29 @@
 
       <div class="controls">
         <a href="{{ url_for('view_book', book=book) }}" class="back-link">← Back to chapters</a>
+      </div>
+
+      <audio id="audio" controls></audio>
+
+      <div class="controls" style="display: flex; align-items: center; justify-content: space-between;">
+        <div>
+            <button onclick="prevChapter()">← Previous</button>
+            <button onclick="nextChapter()">Next →</button>
+            <span id="track-info" class="track-info" style="margin-left: 10px;"></span>
+        </div>
+        <div>
+            <button id="manualResyncBtn" onclick="manualResync()" title="Re-sync audio to current line start" style="margin-left: 10px;">Re-sync</button>
+            <span id="mute-indicator" style="display: none; margin-left: 8px; font-weight: bold; color: var(--warning-color);">(Muted)</span>
+        </div>
+      </div>
+
+      <div id="transcript"></div>
+      <div id="status" class="status">
+        <span id="status-main-text">Loading transcript...</span>
+        <span id="transcript-stats-container" style="display: none; margin-left: 10px; position: relative;">
+          <span id="transcript-info-icon" title="Transcript Details" style="cursor: help; font-weight: bold;">&#9432;</span>
+          <span id="transcript-stats-tooltip" class="tooltip-popup"><span id="transcript-stats-text" style="font-size: 0.9em; margin-left: 4px; font-style: normal;"></span></span>
+        </span>
       </div>
 
       <div class="settings">
@@ -87,7 +109,7 @@
                   <span id="timing-offset-value" class="slider-value">0ms</span>
                 </label>
                 <div class="slider-with-reset">
-                  <input type="range" id="timing-offset-slider" class="slider" min="-0.5" max="0.5" value="0" step="0.05" />
+                  <input type="range" id="timing-offset-slider" class="slider" min="-2.0" max="2.0" value="0" step="0.05" />
                   <button onclick="setDefaultTimingOffset()" class="default-color-btn reset-slider-btn">Reset</button>
                 </div>
               </div>
@@ -148,24 +170,6 @@
           </div>
         </div>
       </div>
-
-      <audio id="audio" controls></audio>
-
-      <div class="controls">
-        <button onclick="prevChapter()">← Previous</button>
-        <button onclick="nextChapter()">Next →</button>
-        <span id="track-info" class="track-info"></span>
-        <span id="mute-indicator" style="display: none; margin-left: 8px; font-weight: bold; color: var(--warning-color);">(Muted)</span>
-      </div>
-
-      <div id="transcript"></div>
-      <div id="status" class="status">
-        <span id="status-main-text">Loading transcript...</span>
-        <span id="transcript-stats-container" style="display: none; margin-left: 10px; position: relative;">
-          <span id="transcript-info-icon" title="Transcript Details" style="cursor: help; font-weight: bold;">&#9432;</span>
-          <span id="transcript-stats-tooltip" class="tooltip-popup"><span id="transcript-stats-text" style="font-size: 0.9em; margin-left: 4px; font-style: normal;"></span></span>
-        </span>
-      </div>
     </div>
 
     <!-- Data script block -->
@@ -175,34 +179,34 @@
       let tracks = []
       let startTrack = ''
       let currentIndex = 0
-      
+
       // Fetch data via AJAX to avoid template conflicts
       async function loadPlayerData() {
         try {
           const urlParams = new URLSearchParams(window.location.search)
           const fileParam = urlParams.get('file') || '' // Initial target file, if any
-      
+
           // Fetch comprehensive file info for the book
           const fileInfoResponse = await fetch(`/api/book/${encodeURIComponent(bookName)}/file-info`)
           if (!fileInfoResponse.ok) {
             throw new Error(`Failed to fetch book file info: ${fileInfoResponse.status}`)
           }
           const allBookFiles = await fileInfoResponse.json()
-      
+
           if (Object.keys(allBookFiles).length === 0) {
             document.getElementById('status-main-text').textContent = 'No audio files found in this book.'
             return false
           }
-      
+
           // Filter for tracks that have VTT files
           tracks = Object.keys(allBookFiles).filter((filename) => allBookFiles[filename].vtt_exists)
           tracks.sort() // Ensure consistent order, though list_mp3s on server also sorts
-      
+
           if (tracks.length === 0) {
             document.getElementById('status-main-text').textContent = 'No captioned tracks available for this book.'
             return false
           }
-      
+
           // Determine the starting track
           if (fileParam && tracks.includes(fileParam)) {
             startTrack = fileParam
@@ -213,13 +217,12 @@
             document.getElementById('status-main-text').textContent = 'Error: No valid starting track found.'
             return false
           }
-      
+
           currentIndex = tracks.indexOf(startTrack)
           if (currentIndex < 0) currentIndex = 0 // Should not happen if logic above is correct
-      
+
           return true
         } catch (error) {
-          // console.error('Error loading player data:', error);
           document.getElementById('status-main-text').textContent = 'Error loading player data: ' + error.message
           return false
         }
@@ -249,7 +252,9 @@
       const currentLineBgOpacitySlider = document.getElementById('current-line-bg-opacity-slider')
       const currentLineBgOpacityValue = document.getElementById('current-line-bg-opacity-value')
       const muteIndicator = document.getElementById('mute-indicator')
-      
+      const playbackRateSlider = document.getElementById('playback-rate-slider');
+      const playbackRateDisplay = document.getElementById('playback-rate-value');
+
       let cues = []
       let normalizedLines = [] // Clean, deduplicated lines for display
       let cueToLineMap = new Map() // Maps cue indices to normalized line indices
@@ -267,11 +272,32 @@
       let rafLoopRunning = false
       let lastAudioCurrentTime = 0
       let settingsInteractionInProgress = false // New flag
-      
+      let isSpeedJoltActive = false; // Flag to prevent re-entrant speed jolt
+      let periodicSyncTimer = null; // Timer for periodic resync
+
+      // Helper function for binary search
+      // Finds the index of the last element in arr whose timeProperty(element) <= time
+      function findLastIndexBeforeOrAt(arr, time, timePropertyGetter) {
+        let low = 0
+        let high = arr.length - 1
+        let ans = -1
+
+        while (low <= high) {
+          let mid = Math.floor((low + high) / 2)
+          if (timePropertyGetter(arr[mid]) <= time) {
+            ans = mid
+            low = mid + 1
+          } else {
+            high = mid - 1
+          }
+        }
+        return ans
+      }
+
       // Tooltip logic
       const infoIcon = document.getElementById('transcript-info-icon')
       const tooltip = document.getElementById('transcript-stats-tooltip')
-      
+
       if (infoIcon && tooltip) {
         infoIcon.addEventListener('mouseenter', () => {
           tooltip.style.display = 'block'
@@ -293,12 +319,12 @@
           tooltip.style.display = tooltip.style.display === 'block' ? 'none' : 'block'
         })
       }
-      
+
       // Update dark mode button text
       function updateDarkModeButton() {
         darkModeButton.textContent = document.documentElement.classList.contains('dark-mode') ? 'Light' : 'Dark'
       }
-      
+
       // Slider value updates
       lookbackSlider.addEventListener('input', function () {
         lookbackValue.textContent = this.value
@@ -309,7 +335,7 @@
           settingsInteractionInProgress = false
         }, 0)
       })
-      
+
       lookaheadSlider.addEventListener('input', function () {
         lookaheadValue.textContent = this.value
         savePlayerSettings()
@@ -319,7 +345,7 @@
           settingsInteractionInProgress = false
         }, 0)
       })
-      
+
       timingOffsetSlider.addEventListener('input', function () {
         timingOffsetValue.textContent = (parseFloat(this.value) * 1000).toFixed(0) + 'ms'
         savePlayerSettings()
@@ -329,18 +355,18 @@
           settingsInteractionInProgress = false
         }, 0)
       })
-      
+
       highlightStyleSelect.addEventListener('change', function () {
         // If the current color was a default for the current theme (for ANY style),
         // then update to the default for the NEW style in the current theme.
         const currentHighlightColor = highlightColorInput.value.toLowerCase()
         const isDarkMode = document.documentElement.classList.contains('dark-mode')
-      
+
         const lightModeBackgroundDefault = '#ffeb3b'
         const lightModeOtherDefault = '#1976d2'
         const darkModeBackgroundDefault = '#ffd700'
         const darkModeOtherDefault = '#ffa726'
-      
+
         let wasADefaultColor = false
         if (isDarkMode) {
           if (currentHighlightColor === darkModeBackgroundDefault || currentHighlightColor === darkModeOtherDefault) {
@@ -351,7 +377,7 @@
             wasADefaultColor = true
           }
         }
-      
+
         if (wasADefaultColor) {
           setDefaultHighlightColor() // This will use the new style from highlightStyleSelect.value
         } else {
@@ -365,7 +391,7 @@
           }, 0)
         }
       })
-      
+
       wordLevelToggle.addEventListener('change', function () {
         // localStorage.setItem('wordLevel', this.checked); // Removed, saved in playerSettings
         savePlayerSettings()
@@ -375,7 +401,7 @@
           settingsInteractionInProgress = false
         }, 0)
       })
-      
+
       highlightColorInput.addEventListener('input', function () {
         // localStorage.setItem('highlightColor', this.value); // Removed, saved in playerSettings
         savePlayerSettings()
@@ -386,11 +412,11 @@
           settingsInteractionInProgress = false
         }, 0)
       })
-      
+
       autoplayToggle.addEventListener('change', function () {
         savePlayerSettings()
       })
-      
+
       currentLineBgInput.addEventListener('input', function () {
         updateCurrentLineStyles()
         savePlayerSettings()
@@ -400,7 +426,7 @@
           settingsInteractionInProgress = false
         }, 0)
       })
-      
+
       currentLineOutlineInput.addEventListener('input', function () {
         updateCurrentLineStyles()
         savePlayerSettings()
@@ -410,7 +436,7 @@
           settingsInteractionInProgress = false
         }, 0)
       })
-      
+
       currentLineThicknessSlider.addEventListener('input', function () {
         currentLineThicknessValue.textContent = this.value + 'px'
         updateCurrentLineStyles()
@@ -421,7 +447,7 @@
           settingsInteractionInProgress = false
         }, 0)
       })
-      
+
       currentLineBgOpacitySlider.addEventListener('input', function () {
         currentLineBgOpacityValue.textContent = parseFloat(this.value).toFixed(2)
         updateCurrentLineStyles()
@@ -432,7 +458,7 @@
           settingsInteractionInProgress = false
         }, 0)
       })
-      
+
       function savePlayerSettings() {
         const settings = {
           autoplay: autoplayToggle.checked,
@@ -448,11 +474,12 @@
           timingOffset: parseFloat(timingOffsetSlider.value),
           currentLineBgOpacity: parseFloat(currentLineBgOpacitySlider.value),
           audioVolume: audio.volume,
-          audioMuted: audio.muted
+          audioMuted: audio.muted,
+          playbackRate: audio.playbackRate
         }
         localStorage.setItem('playerSettings', JSON.stringify(settings))
       }
-      
+
       // Enhanced playback persistence with cross-tab sync
       class PlaybackPersistence {
         constructor() {
@@ -462,15 +489,15 @@
           this.db = null
           this.initDB()
         }
-      
+
         async initDB() {
           try {
             this.db = await new Promise((resolve, reject) => {
               const request = indexedDB.open(this.dbName, this.version)
-      
+
               request.onerror = () => reject(request.error)
               request.onsuccess = () => resolve(request.result)
-      
+
               request.onupgradeneeded = (event) => {
                 const db = event.target.result
                 if (!db.objectStoreNames.contains(this.storeName)) {
@@ -481,11 +508,10 @@
               }
             })
           } catch (error) {
-            // console.warn('IndexedDB not available, falling back to localStorage:', error);
             this.db = null
           }
         }
-      
+
         async savePosition(book, track, currentTime) {
           const position = {
             id: `${book}:${track}`,
@@ -494,7 +520,7 @@
             currentTime: currentTime,
             timestamp: Date.now()
           }
-      
+
           // Save to IndexedDB if available
           if (this.db) {
             try {
@@ -502,16 +528,15 @@
               const store = transaction.objectStore(this.storeName)
               await store.put(position)
             } catch (error) {
-              // console.warn('IndexedDB save failed, using localStorage:', error)
               this.saveToLocalStorage(position)
             }
           } else {
             this.saveToLocalStorage(position)
           }
-      
+
           // Save to localStorage for immediate access and cross-tab sync
           this.saveToLocalStorage(position)
-      
+
           // Broadcast to other tabs
           window.postMessage(
             {
@@ -521,66 +546,70 @@
             '*'
           )
         }
-      
+
         saveToLocalStorage(position) {
           localStorage.setItem('playbackPosition', JSON.stringify(position))
           localStorage.setItem(`playbackPosition:${position.book}:${position.track}`, JSON.stringify(position))
         }
-      
-        async loadPosition(book, track) {
-          // Try IndexedDB first
+
+        async loadPosition(book, trackName) {
+          let position = null
+
+          // Try IndexedDB if available
           if (this.db) {
             try {
               const transaction = this.db.transaction([this.storeName], 'readonly')
               const store = transaction.objectStore(this.storeName)
-              const request = store.get(`${book}:${track}`)
-              const result = await new Promise((resolve, reject) => {
+              const request = store.get(`${book}:${trackName}`)
+              position = await new Promise((resolve, reject) => {
                 request.onsuccess = () => resolve(request.result)
                 request.onerror = () => reject(request.error)
               })
-      
-              if (result && this.isPositionValid(result)) {
-                return result
+
+              if (position) {
+                if (!this.isPositionValid(position) || position.book !== bookName || position.track !== trackName) {
+                  position = null // Invalidate if old or mismatched
+                }
+              } else {
+                // No position found in IndexedDB, position remains null or what was passed
               }
             } catch (error) {
-              // console.warn('IndexedDB load failed, using localStorage:', error)
+              position = null; // Ensure position is null on error
             }
           }
-      
-          // Fallback to localStorage
-          const specificKey = `playbackPosition:${book}:${track}`
-          const specificSaved = localStorage.getItem(specificKey)
-          if (specificSaved) {
+
+          // Fallback to localStorage (specific key)
+          if (!position) {
             try {
-              const position = JSON.parse(specificSaved)
-              if (this.isPositionValid(position)) {
-                return position
+              const storedPositionSpecific = localStorage.getItem(`playbackPosition:${bookName}:${trackName}`)
+              if (storedPositionSpecific) {
+                const parsed = JSON.parse(storedPositionSpecific)
+                if (this.isPositionValid(parsed) && parsed.book === bookName && parsed.track === trackName) {
+                  position = parsed
+                }
               }
-            } catch (e) {
-              // console.warn('Error parsing specific position:', e)
-            }
+            } catch (e) { /* ignore parse errors */ }
           }
-      
-          // Fallback to general position if same book/track
-          const generalSaved = localStorage.getItem('playbackPosition')
-          if (generalSaved) {
+
+          // Fallback to localStorage (general key) - ensure it matches current book/track
+          if (!position) {
             try {
-              const position = JSON.parse(generalSaved)
-              if (position.book === book && position.track === track && this.isPositionValid(position)) {
-                return position
+              const storedPositionGeneral = localStorage.getItem('playbackPosition')
+              if (storedPositionGeneral) {
+                const parsed = JSON.parse(storedPositionGeneral)
+                if (this.isPositionValid(parsed) && parsed.book === bookName && parsed.track === trackName) {
+                  position = parsed
+                }
               }
-            } catch (e) {
-              // console.warn('Error parsing general position:', e)
-            }
+            } catch (e) { /* ignore parse errors */ }
           }
-      
-          return null
+          return position
         }
-      
+
         isPositionValid(position) {
           return position && position.currentTime > 0 && position.timestamp && Date.now() - position.timestamp < 24 * 60 * 60 * 1000 // 24 hours
         }
-      
+
         async saveCurrentChapter(book, chapter) {
           const progress = {
             id: `chapter:${book}`,
@@ -588,52 +617,91 @@
             currentChapter: chapter,
             timestamp: Date.now()
           }
-      
+
           if (this.db) {
             try {
               const transaction = this.db.transaction([this.storeName], 'readwrite')
               const store = transaction.objectStore(this.storeName)
               await store.put(progress)
             } catch (error) {
-              // console.warn('IndexedDB chapter save failed:', error)
             }
           }
-      
+
           localStorage.setItem('chapterProgress', JSON.stringify(progress))
         }
       }
-      
+
       // Initialize playback persistence
       const playbackPersistence = new PlaybackPersistence()
-      
+
       // Enhanced playback position save/load functions
-      async function loadPlaybackPosition() {
+      async function loadPlaybackPosition(isAutoplay = false) {
         if (!tracks[currentIndex]) {
           return
         }
-      
+
+
+        if (isAutoplay) {
+            // If it's an autoplay, we want to start the track from 00:00
+            // and ensure the transcript reflects this.
+            // We need to make sure the audio element is ready before setting currentTime.
+            const startFromBeginning = () => {
+                if (audio.readyState >= 1) { // HAVE_METADATA or more
+                    audio.currentTime = 0;
+                    updateTranscriptDisplay(0); // Update transcript to show start
+                    // If audio was paused (e.g. after previous track ended but before autoplay kicks in),
+                    // and autoplay is checked, ensure it plays.
+                    // This is handled by the 'loadeddata' event listener in nextChapter for autoplay.
+                    // Start the render loop if not already started
+                    startTranscriptRenderLoop();
+                } else {
+                    audio.addEventListener('loadedmetadata', function onLoadedMetadataForAutoplay() {
+                        audio.currentTime = 0;
+                        updateTranscriptDisplay(0);
+                        startTranscriptRenderLoop();
+                        audio.removeEventListener('loadedmetadata', onLoadedMetadataForAutoplay);
+                    }, { once: true });
+                }
+            };
+
+            // Ensure transcript is loaded before trying to start from beginning
+            if (!transcriptDataLoadedForCurrentTrack) {
+                try {
+                    await loadTranscript(tracks[currentIndex]);
+                    startFromBeginning(); // Now try to set time to 0
+                } catch (error) {
+                    return; // Don't proceed if transcript fails
+                }
+            } else {
+                startFromBeginning(); // Transcript already loaded, set time to 0
+            }
+            return; // Crucially, return here to bypass restoring saved position
+        }
+
+        // --- Original logic for non-autoplay ---
         if (!transcriptDataLoadedForCurrentTrack) {
           try {
             await loadTranscript(tracks[currentIndex]) // Await its completion. loadTranscript will set the flag.
           } catch (error) {
-            // console.error('[LPBP] Error awaiting loadTranscript in loadPlaybackPosition:', error)
             return
           }
         }
         // At this point, transcriptDataLoadedForCurrentTrack should be true if loadTranscript succeeded.
-      
+
         const position = await playbackPersistence.loadPosition(bookName, tracks[currentIndex])
-      
+
         if (position && position.currentTime > 0) {
           const setPositionAndUpdate = () => {
             if (audio.readyState >= 2 && position.currentTime < audio.duration) {
               audio.addEventListener(
                 'seeked',
                 function onSeeked() {
-                  // console.log(`[LPBP Seeked] Target: ${position.currentTime.toFixed(3)}, Actual: ${audio.currentTime.toFixed(3)}`);
-                  updateTranscriptDisplay() // Use live audio.currentTime after seek
-                  lastAudioCurrentTime = audio.currentTime // Sync lastAudioCurrentTime
-                  audio.removeEventListener('seeked', onSeeked) // Clean up listener
+                  updateTranscriptDisplay(position.currentTime); // Immediate update with INTENDED time
+                  audio.removeEventListener('seeked', onSeeked); // Remove self
+
+                  lastAudioCurrentTime = audio.currentTime;
+                  updateTranscriptDisplay();
+                  startTranscriptRenderLoop();
                 },
                 { once: true }
               )
@@ -646,29 +714,35 @@
                     audio.addEventListener(
                       'seeked',
                       function onSeekedAfterLoad() {
-                        // console.log(`[LPBP SeekedAfterLoad] Target: ${position.currentTime.toFixed(3)}, Actual: ${audio.currentTime.toFixed(3)}`);
-                        updateTranscriptDisplay() // Use live audio.currentTime after seek
-                        lastAudioCurrentTime = audio.currentTime // Sync lastAudioCurrentTime
-                        audio.removeEventListener('seeked', onSeekedAfterLoad)
+                        updateTranscriptDisplay(position.currentTime); // Immediate update with INTENDED time
+                        audio.removeEventListener('seeked', onSeekedAfterLoad); // Remove self
+
+                        // REMOVED settleDelay and setTimeout
+                        lastAudioCurrentTime = audio.currentTime;
+                        updateTranscriptDisplay();
+                        startTranscriptRenderLoop();
                       },
                       { once: true }
                     )
                     audio.currentTime = position.currentTime
                   }
-                  audio.removeEventListener('loadeddata', onLoadedData)
+                  audio.removeEventListener('loadeddata', onLoadedData) // Clean up loadeddata listener
                 },
                 { once: true }
               )
             }
           }
           setPositionAndUpdate()
+        } else {
+          // If no valid position, explicitly update display for current time (likely 0 or start)
+          updateTranscriptDisplay()
         }
       }
-      
+
       function saveCurrentChapterProgress(book, chapter) {
         playbackPersistence.saveCurrentChapter(book, chapter)
       }
-      
+
       // Listen for playback position updates from other tabs
       window.addEventListener('message', function (event) {
         if (event.data.type === 'playbackPositionUpdate') {
@@ -681,14 +755,12 @@
           }
         }
       })
-      
+
       function setDefaultHighlightColor() {
         const isDarkMode = document.documentElement.classList.contains('dark-mode')
         const selectedStyle = highlightStyleSelect.value
         let defaultColor = ''
-      
-        // console.log(`[setDefaultHighlightColor] Entry. Selected Style: "${selectedStyle}", Is Dark Mode: ${isDarkMode}`);
-      
+
         if (selectedStyle === 'highlight-background') {
           if (isDarkMode) {
             defaultColor = '#ffd700' // Background DARK = Gold
@@ -703,9 +775,7 @@
             defaultColor = '#1976d2' // Other styles LIGHT = Blue
           }
         }
-      
-        // console.log(`[setDefaultHighlightColor] Chosen Default Color: "${defaultColor}" for style "${selectedStyle}"`);
-      
+
         highlightColorInput.value = defaultColor
         settingsInteractionInProgress = true
         updateHighlightColor()
@@ -715,16 +785,16 @@
           settingsInteractionInProgress = false
         }, 0)
       }
-      
+
       function setDefaultCurrentLineBg() {
         const isDarkMode = document.documentElement.classList.contains('dark-mode')
         const defaultColor = isDarkMode ? '#2a4a6b' : '#e6f3ff'
-      
+
         currentLineBgInput.value = defaultColor
         // Opacity is NOT reset here, respecting the user's current opacity setting.
         // currentLineBgOpacitySlider.value = 1;
         // currentLineBgOpacityValue.textContent = '1.00';
-      
+
         settingsInteractionInProgress = true
         updateCurrentLineStyles()
         savePlayerSettings()
@@ -733,12 +803,12 @@
           settingsInteractionInProgress = false
         }, 0)
       }
-      
+
       function setDefaultCurrentLineOutline() {
         // Default to no outline for cleaner appearance
         const isDarkMode = document.documentElement.classList.contains('dark-mode')
         const defaultColor = isDarkMode ? '#ffffff' : '#000000'
-      
+
         currentLineOutlineInput.value = defaultColor
         currentLineThicknessSlider.value = 0 // Default to no outline
         currentLineThicknessValue.textContent = '0px'
@@ -749,20 +819,20 @@
           settingsInteractionInProgress = false
         }, 0)
       }
-      
+
       function updateCurrentLineStyles() {
         const hexColor = currentLineBgInput.value
         const alpha = parseFloat(currentLineBgOpacitySlider.value)
         const outlineColor = currentLineOutlineInput.value
         const thickness = currentLineThicknessSlider.value
-      
+
         const bgColorRgba = hexToRgba(hexColor, alpha)
-      
+
         document.documentElement.style.setProperty('--current-line-bg', bgColorRgba)
         document.documentElement.style.setProperty('--current-line-outline', outlineColor)
         document.documentElement.style.setProperty('--current-line-thickness', thickness)
       }
-      
+
       function hexToRgba(hex, alpha) {
         let r = 0,
           g = 0,
@@ -781,18 +851,18 @@
         }
         return `rgba(${r},${g},${b},${alpha})`
       }
-      
+
       function loadPlayerSettings() {
         const saved = localStorage.getItem('playerSettings')
         if (saved) {
           try {
             const settings = JSON.parse(saved)
-      
+
             // Restore autoplay
             if (settings.autoplay !== undefined) {
               autoplayToggle.checked = settings.autoplay
             }
-      
+
             // Restore lookback/lookahead
             if (settings.lookback !== undefined) {
               lookbackSlider.value = settings.lookback
@@ -802,7 +872,7 @@
               lookaheadSlider.value = settings.lookahead
               lookaheadValue.textContent = settings.lookahead
             }
-      
+
             // Restore timing offset
             if (settings.timingOffset !== undefined) {
               timingOffsetSlider.value = settings.timingOffset
@@ -812,28 +882,28 @@
               timingOffsetSlider.value = 0 // Default to 0
               timingOffsetValue.textContent = '0ms'
             }
-      
+
             // Restore highlight style
             if (settings.highlightStyle) {
               highlightStyleSelect.value = settings.highlightStyle
             }
-      
+
             // Restore word level toggle
             if (settings.wordLevel !== undefined) {
               wordLevelToggle.checked = settings.wordLevel
             }
-      
+
             // Restore highlight color
             if (settings.highlightColor) {
               highlightColorInput.value = settings.highlightColor
               updateHighlightColor()
             }
-      
+
             // Restore focus mode (dark mode handled by unified system)
             if (settings.focusMode) {
               document.documentElement.classList.add('focus-mode')
             }
-      
+
             // Restore current line styling
             if (settings.currentLineBg) {
               currentLineBgInput.value = settings.currentLineBg
@@ -866,10 +936,10 @@
               currentLineBgOpacitySlider.value = 1
               currentLineBgOpacityValue.textContent = '1.00'
             }
-      
+
             // Apply current line styles
             updateCurrentLineStyles()
-      
+
             // Restore volume and mute state
             if (settings.audioVolume !== undefined) {
               audio.volume = settings.audioVolume
@@ -878,36 +948,43 @@
               audio.muted = settings.audioMuted
             }
             updateMuteIndicator() // Update display based on loaded settings
+
+            if (settings.playbackRate !== undefined) {
+              audio.playbackRate = parseFloat(settings.playbackRate);
+            } else {
+              audio.playbackRate = 1.0; // Default if not set
+            }
+            updatePlaybackRateUI(); // Update slider and display from loaded/default rate
+
           } catch (e) {
-            // console.error('Error loading player settings:', e)
           }
         } else {
           // No saved settings, set defaults
           setDefaultCurrentLineBg()
           setDefaultCurrentLineOutline()
         }
-      
+
         // Update dark mode button text after settings are loaded
         updateDarkModeButton()
       }
-      
+
       function updateHighlightColor() {
         const color = highlightColorInput.value
         document.documentElement.style.setProperty('--highlight-color', color)
       }
-      
+
       function toggleSettings() {
         const content = document.getElementById('settings-content')
         const toggle = document.getElementById('settings-toggle')
-      
+
         if (content.classList.contains('open')) {
           // === CLOSING ===
           stopTranscriptRenderLoop()
           settingsInteractionInProgress = true
-      
+
           content.classList.remove('open') // Trigger layout change
           toggle.textContent = '▼'
-      
+
           // Defer transcript updates until after the browser has likely processed the layout change
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
@@ -924,19 +1001,19 @@
           toggle.textContent = '▲'
         }
       }
-      
+
       function toggleDarkMode() {
         const oldIsDarkMode = document.documentElement.classList.contains('dark-mode')
         document.documentElement.classList.toggle('dark-mode')
         const newIsDarkMode = document.documentElement.classList.contains('dark-mode')
         localStorage.setItem('siteWideDarkMode', newIsDarkMode)
         updateDarkModeButton()
-      
+
         // --- Word Highlight Color ---
         const currentHighlightColor = highlightColorInput.value.toLowerCase()
         const selectedHighlightStyle = highlightStyleSelect.value
         let oldThemeDefaultHighlightColor
-      
+
         if (selectedHighlightStyle === 'highlight-background') {
           if (oldIsDarkMode) {
             oldThemeDefaultHighlightColor = '#ffd700' // Background DARK = Gold
@@ -951,43 +1028,43 @@
             oldThemeDefaultHighlightColor = '#1976d2' // Other styles LIGHT = Blue
           }
         }
-      
+
         if (currentHighlightColor === oldThemeDefaultHighlightColor) {
           setDefaultHighlightColor()
         }
-      
+
         // --- Current Line Background Color & Opacity ---
         const currentLineBg = currentLineBgInput.value.toLowerCase()
         const lightLineBgDefault = '#e6f3ff'
         const darkLineBgDefault = '#2a4a6b'
-      
+
         if ((oldIsDarkMode && currentLineBg === darkLineBgDefault) || (!oldIsDarkMode && currentLineBg === lightLineBgDefault)) {
           setDefaultCurrentLineBg() // This will now preserve opacity
         }
-      
+
         const currentLineOutlineColor = currentLineOutlineInput.value.toLowerCase()
         const currentLineOutlineThickness = parseInt(currentLineThicknessSlider.value)
         const lightLineOutlineDefaultColor = '#000000'
         const darkLineOutlineDefaultColor = '#ffffff'
         const defaultLineOutlineThickness = 0
-      
+
         if (((oldIsDarkMode && currentLineOutlineColor === darkLineOutlineDefaultColor) || (!oldIsDarkMode && currentLineOutlineColor === lightLineOutlineDefaultColor)) && currentLineOutlineThickness === defaultLineOutlineThickness) {
           setDefaultCurrentLineOutline()
         } else if ((oldIsDarkMode && currentLineOutlineColor === darkLineOutlineDefaultColor) || (!oldIsDarkMode && currentLineOutlineColor === lightLineOutlineDefaultColor)) {
           currentLineOutlineInput.value = newIsDarkMode ? darkLineOutlineDefaultColor : lightLineOutlineDefaultColor
           updateCurrentLineStyles()
         }
-      
+
         savePlayerSettings()
         window.postMessage({ type: 'darkModeChange', darkMode: newIsDarkMode }, '*')
       }
-      
+
       function toggleFocusMode() {
         document.documentElement.classList.toggle('focus-mode')
         // localStorage.setItem('focusMode', document.documentElement.classList.contains('focus-mode')) // Removed, saved in playerSettings
         savePlayerSettings()
       }
-      
+
       function applySiteWideDarkMode() {
         const isDarkMode = localStorage.getItem('siteWideDarkMode') === 'true'
         if (isDarkMode) {
@@ -997,7 +1074,7 @@
         }
         updateDarkModeButton()
       }
-      
+
       // Listen for dark mode changes from other tabs
       window.addEventListener('message', function (event) {
         if (event.data.type === 'darkModeChange') {
@@ -1009,18 +1086,18 @@
           updateDarkModeButton()
         }
       })
-      
+
       // Listen for storage changes (for cross-tab sync)
       window.addEventListener('storage', function (event) {
         if (event.key === 'siteWideDarkMode') {
           applySiteWideDarkMode()
         }
       })
-      
+
       // ULTRA-FAST LOADING - Absolute minimum to show page
       window.addEventListener('DOMContentLoaded', function () {
         applySiteWideDarkMode() // Apply dark mode ASAP
-      
+
         loadPlayerData()
           .then((playerDataSuccess) => {
             if (playerDataSuccess) {
@@ -1033,61 +1110,64 @@
             }
           })
           .catch((error) => {
-            // console.error('Fatal Error during player data loading:', error)
             document.getElementById('status-main-text').textContent = 'Fatal Error: Player initialization failed.'
           })
       })
-      
+
       function initializePlayerFeatures() {
         // Load all features in ultra-lazy chunks
         setTimeout(loadPlayerSettings, 10)
         setTimeout(setupEventListeners, 20)
         setTimeout(setupLazyTranscriptLoading, 30) // This will trigger loadTranscript when needed
       }
-      
+
       function showBasicPlayerInterface() {
         const mp3 = tracks[currentIndex]
         audio.src = getFileUrl(mp3)
         trackInfo.textContent = currentIndex + 1 + '/' + tracks.length + ': ' + mp3
-      
+
         document.getElementById('status-main-text').textContent = 'Ready to play'
         document.getElementById('transcript-stats-container').style.display = 'none'
-      
+
         transcript.innerHTML = '<div style="text-align: center; padding: 40px; opacity: 0.7;">🎧 Start playing to see transcript</div>'
-      
+
         const currentUrl = new URL(window.location)
         currentUrl.searchParams.set('file', mp3)
         window.history.replaceState({}, '', currentUrl)
-      
+
         saveCurrentChapterProgress(bookName, mp3)
-      
+
         // Defer loadPlaybackPosition slightly to ensure audio element is ready and other setups.
         setTimeout(() => {
           loadPlaybackPosition().catch((error) => {
-            // console.warn('[SBPI] Failed to load playback position:', error)
           })
         }, 50) // Slightly increased delay to ensure audio element properties are stable
       }
-      
+
       function setupEventListeners() {
         // Auto-advance to next chapter when current ends
         audio.addEventListener('ended', function () {
+          isSpeedJoltActive = false; // Reset jolt flag on track end
+          stopForceSyncLoop(); // Stop periodic sync
           if (autoplayToggle.checked) {
             nextChapter()
           }
         })
-      
-        // Force transcript update on play/pause to handle rapid toggles
+
         audio.addEventListener('play', function () {
-          lastAudioCurrentTime = audio.currentTime // Set this first
+          applySpeedJolt(); // Apply speed jolt on play
+          lastAudioCurrentTime = audio.currentTime
           updateTranscriptDisplay()
+          startForceSyncLoop(); // Start periodic sync
         })
-      
+
         audio.addEventListener('pause', function () {
-          lastAudioCurrentTime = audio.currentTime // Set this first
+          isSpeedJoltActive = false; // Reset jolt flag on pause
+          stopForceSyncLoop(); // Stop periodic sync
+          lastAudioCurrentTime = audio.currentTime
           updateTranscriptDisplay()
         })
-      
+
         // Save playback position periodically and on pause/seek
         audio.addEventListener('timeupdate', function () {
           // Save position every 5 seconds to avoid excessive localStorage writes
@@ -1095,13 +1175,13 @@
             savePlaybackPosition()
           }
         })
-      
+
         audio.addEventListener('pause', savePlaybackPosition)
         audio.addEventListener('seeked', savePlaybackPosition)
-      
+
         // Smart scroll detection to respect user interaction
         let scrollDetectionTimeout = null
-      
+
         transcript.addEventListener(
           'scroll',
           function () {
@@ -1117,7 +1197,7 @@
           },
           { passive: true }
         )
-      
+
         // Detect manual scroll via mouse wheel, touch, or keyboard
         transcript.addEventListener(
           'wheel',
@@ -1132,7 +1212,7 @@
           },
           { passive: true }
         )
-      
+
         transcript.addEventListener(
           'touchmove',
           function () {
@@ -1146,19 +1226,19 @@
           },
           { passive: true }
         )
-      
+
         // Keyboard shortcuts
         document.addEventListener('keydown', function (e) {
           if (document.activeElement === audio) {
             // If audio player has focus, don't override its space/arrow keys
             if (e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') return
           }
-      
+
           if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') {
             // Don't interfere with input fields
             if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') return // Allow arrow keys for text input navigation
           }
-      
+
           if (e.key === 'ArrowRight' || e.key === 'n') nextChapter()
           if (e.key === 'ArrowLeft' || e.key === 'p') prevChapter()
           if (e.key === 'f' || e.key === 'F') toggleFocusMode()
@@ -1167,7 +1247,7 @@
             if (audio.paused) audio.play()
             else audio.pause()
           }
-      
+
           // Arrow keys in transcript indicate user manual navigation
           if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
             if (document.activeElement === transcript || transcript.contains(document.activeElement)) {
@@ -1181,53 +1261,57 @@
             }
           }
         })
-      
+
         audio.addEventListener('volumechange', function () {
           savePlayerSettings() // Save volume/mute state
           updateMuteIndicator()
         })
+
+        audio.addEventListener('ratechange', function () {
+          savePlayerSettings() // Save playback rate when it changes
+        })
       }
-      
+
       function setupLazyTranscriptLoading() {
         const mp3 = tracks[currentIndex]
         let transcriptLoaded = false
-      
+
         function loadTranscriptIfNeeded() {
           if (!transcriptLoaded) {
             transcriptLoaded = true
             loadTranscript(mp3)
           }
         }
-      
+
         // Load transcript on first interaction
         audio.addEventListener('play', loadTranscriptIfNeeded, { once: true })
         audio.addEventListener('seeking', loadTranscriptIfNeeded, { once: true })
         audio.addEventListener('timeupdate', loadTranscriptIfNeeded, { once: true })
-      
+
         // Also load if user clicks on transcript area
         transcript.addEventListener('click', loadTranscriptIfNeeded, { once: true })
       }
-      
+
       // Enhanced transcript system with normalized line dataset and separate word timing
       function parseVTTSimple(vttText) {
         const lines = vttText.split(/\r?\n/)
         const newWordCues = [] // This will be our flat list of WordCue objects
         let i = 0
-      
+
         // Skip header
         while (i < lines.length && !lines[i].includes('-->')) {
           i++
         }
-      
+
         // Parse all cues from VTT
         while (i < lines.length) {
           const line = lines[i].trim()
-      
+
           if (line.includes('-->')) {
             const [startStr, endStr] = line.split('-->').map((s) => s.trim())
             const startTime = parseTimestamp(startStr)
             const endTime = parseTimestamp(endStr)
-      
+
             i++
             let vttCueTextContent = ''
             while (i < lines.length && lines[i].trim() !== '') {
@@ -1235,19 +1319,19 @@
               vttCueTextContent += lines[i].trim()
               i++
             }
-      
+
             if (vttCueTextContent) {
               let wordText = ''
               const uMatch = vttCueTextContent.match(/<u>([^<]*)<\/u>/)
               if (uMatch && uMatch[1]) {
                 wordText = uMatch[1]
               }
-      
+
               const fullLineTextClean = vttCueTextContent
                 .replace(/<[^>]*>/g, '')
                 .replace(/\s+/g, ' ')
                 .trim()
-      
+
               if (wordText && fullLineTextClean) {
                 newWordCues.push({
                   startTime: startTime,
@@ -1260,7 +1344,7 @@
           }
           i++
         }
-      
+
         const lineSet = new Set()
         const tempNormalizedLines = []
         const linesMap = new Map()
@@ -1270,7 +1354,7 @@
           }
           linesMap.get(wordCue.fullLineTextClean).push(wordCue)
         })
-      
+
         linesMap.forEach((wordsInLine, lineText) => {
           if (lineText && !lineSet.has(lineText)) {
             lineSet.add(lineText)
@@ -1288,111 +1372,66 @@
             })
           }
         })
-      
+
         tempNormalizedLines.sort((a, b) => a.startTime - b.startTime)
-      
+
         cues = newWordCues
         normalizedLines = tempNormalizedLines
-        cueToLineMap = new Map()
-      
-        // console.log(`Parsed ${cues.length} word cues into ${normalizedLines.length} unique display lines`)
+        cueToLineMap = new Map() // Reset and ensure it's a new Map
+
+        // Populate cueToLineMap
+        normalizedLines.forEach((line, lineIndex) => {
+          if (line.wordIndices) {
+            line.wordIndices.forEach((wordCueIndex) => {
+              cueToLineMap.set(wordCueIndex, lineIndex)
+            })
+          }
+        })
+
         return cues
       }
-      
+
       // Find active cue and line based on current time
       function findActiveIndices(currentTime) {
-        let activeWordIndex = -1
-        let activeLineIndex = -1
-        const internalLookAheadOffset = 0.0 // Changed from 0.02 to 0
-        const userTimingOffset = parseFloat(timingOffsetSlider.value) || 0 // Get user-configured offset
-        const effectiveTime = currentTime + internalLookAheadOffset + userTimingOffset
-      
-        // console.log(`[findActiveIndices] currentTime: ${currentTime.toFixed(3)}, userOffset: ${userTimingOffset.toFixed(3)}, effectiveTime: ${effectiveTime.toFixed(3)}`);
-      
-        if (!cues || cues.length === 0 || !normalizedLines || normalizedLines.length === 0) {
-          return { activeWordIndex: -1, activeLineIndex: -1 }
-        }
-      
-        // 1. Find the active word using effectiveTime
-        // Exact match: effectiveTime is within a word's start and end time
-        for (let i = 0; i < cues.length; i++) {
-          if (effectiveTime >= cues[i].startTime && effectiveTime < cues[i].endTime) {
-            activeWordIndex = i
-            break
-          }
-        }
-      
-        // Fallback: If no exact word match, find the last word that has started based on effectiveTime
-        if (activeWordIndex === -1) {
-          let lastStartedWord = -1
-          for (let i = 0; i < cues.length; i++) {
-            if (cues[i].startTime <= effectiveTime) {
-              lastStartedWord = i
-            } else {
-              break // Cues are sorted by startTime
+        const userTimingOffset = parseFloat(timingOffsetSlider.value) || 0;
+        const effectiveTime = currentTime + userTimingOffset;
+
+        let activeWordIndex = -1;
+        if (cues && cues.length > 0) {
+            const wordCandidateIdx = findLastIndexBeforeOrAt(cues, effectiveTime, (c) => c.startTime);
+            // If a candidate is found (not -1), it means cues[wordCandidateIdx].startTime <= effectiveTime,
+            // and it's the latest such cue. This is our active word.
+            if (wordCandidateIdx !== -1) {
+                activeWordIndex = wordCandidateIdx;
             }
-          }
-          activeWordIndex = lastStartedWord
         }
-      
-        // 2. Determine the active line based on effectiveTime primarily, then active word
-        // Primary: Find line where effectiveTime is within line's start and end time
-        for (let i = 0; i < normalizedLines.length; i++) {
-          if (effectiveTime >= normalizedLines[i].startTime && effectiveTime <= normalizedLines[i].endTime) {
-            activeLineIndex = i
-            break
-          }
-        }
-      
-        // Fallback for activeLineIndex if not found by direct time match, but we have an active word
-        if (activeLineIndex === -1 && activeWordIndex !== -1 && cues[activeWordIndex]) {
-          const activeWordLineText = cues[activeWordIndex].fullLineTextClean
-          for (let i = 0; i < normalizedLines.length; i++) {
-            if (normalizedLines[i].text === activeWordLineText) {
-              // Ensure the word's effectiveTime is somewhat close or within this line (using 0.5s window for lines)
-              if (effectiveTime >= normalizedLines[i].startTime - 0.5 && effectiveTime <= normalizedLines[i].endTime + 0.5) {
-                activeLineIndex = i
-                break
-              }
-              if (activeLineIndex === -1) activeLineIndex = i // Default to first matching line for the word
+
+        let activeLineIndex = -1;
+        if (activeWordIndex !== -1 && cueToLineMap && cueToLineMap.has(activeWordIndex)) {
+            activeLineIndex = cueToLineMap.get(activeWordIndex);
+        } else if (normalizedLines && normalizedLines.length > 0) {
+            // Fallback if no specific word is active (e.g., word-level VTT not present or time is before first word)
+            // or if cueToLineMap isn't populated for some reason.
+            const lineCandidateIdx = findLastIndexBeforeOrAt(normalizedLines, effectiveTime, (l) => l.startTime);
+            // If a candidate line is found, it's our active line.
+            if (lineCandidateIdx !== -1) {
+                activeLineIndex = lineCandidateIdx;
             }
-          }
         }
-      
-        // If still no active line, but we have an active word, try to find its line directly using the word's original line text.
-        if (activeLineIndex === -1 && activeWordIndex !== -1 && cues[activeWordIndex]) {
-          const activeWordLineText = cues[activeWordIndex].fullLineTextClean
-          const potentialLineIndex = normalizedLines.findIndex((line) => line.text === activeWordLineText)
-          if (potentialLineIndex !== -1) {
-            activeLineIndex = potentialLineIndex
-          }
-        }
-      
-        // If effectiveTime is before the first line starts
-        if (activeLineIndex === -1 && normalizedLines.length > 0 && effectiveTime < normalizedLines[0].startTime) {
-          activeLineIndex = -1 // No line is truly active yet
-        }
-      
-        // If effectiveTime is after the last line ends
-        if (activeLineIndex === -1 && normalizedLines.length > 0 && currentTime > normalizedLines[normalizedLines.length - 1].endTime) {
-          // For time after last line, use actual currentTime to avoid offset making it stick to last line too long
-          activeLineIndex = normalizedLines.length - 1 // Highlight the last line
-        }
-      
-        return { activeWordIndex, activeLineIndex }
+        return { activeWordIndex, activeLineIndex };
       }
-      
+
       // Main transcript update loop using requestAnimationFrame
       function transcriptRenderLoop() {
         if (!rafLoopRunning) return
-      
+
         if (audio.currentTime !== lastAudioCurrentTime) {
           updateTranscriptDisplay() // Uses live audio.currentTime
           lastAudioCurrentTime = audio.currentTime
         }
         requestAnimationFrame(transcriptRenderLoop)
       }
-      
+
       function startTranscriptRenderLoop() {
         if (!rafLoopRunning) {
           rafLoopRunning = true
@@ -1400,49 +1439,50 @@
           requestAnimationFrame(transcriptRenderLoop)
         }
       }
-      
+
       function stopTranscriptRenderLoop() {
         rafLoopRunning = false
       }
-      
+
       // Enhanced transcript display using normalized lines
       function updateTranscriptDisplay(forcedTime = null) {
         const currentTime = forcedTime !== null ? forcedTime : audio.currentTime
-        // console.log(`[UTD Entry] Called. Audio currentTime: ${audio.currentTime.toFixed(3)}, Using currentTime: ${currentTime.toFixed(3)}`);
-      
+
         if (!normalizedLines || normalizedLines.length === 0 || !cues || cues.length === 0) {
-          // console.log('[UTD] No normalizedLines or cues, returning.');
           return
         }
-      
+
         const isWordLevel = wordLevelToggle.checked
         const lookback = parseInt(lookbackSlider.value)
         const lookahead = parseInt(lookaheadSlider.value)
-      
+        const userTimingOffset = parseFloat(timingOffsetSlider.value) || 0; // Get offset for words
+
         // Find the line that *should* be current based on simpler rule for holding highlight
+        // This part uses the raw currentTime, as it's about which line is generally "active"
+        // The offset is primarily for fine-tuning the word-level sync *within* that active line or nearby lines.
         let currentDisplayLineIndex = -1
         for (let i = 0; i < normalizedLines.length; i++) {
           const lineStartTime = normalizedLines[i].startTime
           const nextLineStartTime = i + 1 < normalizedLines.length ? normalizedLines[i + 1].startTime : Infinity
-      
-          if (currentTime >= lineStartTime && currentTime < nextLineStartTime) {
+
+          // Use effectiveTime for determining the currentDisplayLineIndex to make line selection honor offset
+          if (currentTime + userTimingOffset >= lineStartTime && currentTime + userTimingOffset < nextLineStartTime) {
             currentDisplayLineIndex = i
             break
           }
         }
-        // If currentTime is past the start of the last line, it should be current
-        if (currentDisplayLineIndex === -1 && normalizedLines.length > 0 && currentTime >= normalizedLines[normalizedLines.length - 1].startTime) {
+        // If effectiveTime is past the start of the last line, it should be current
+        if (currentDisplayLineIndex === -1 && normalizedLines.length > 0 && currentTime + userTimingOffset >= normalizedLines[normalizedLines.length - 1].startTime) {
           currentDisplayLineIndex = normalizedLines.length - 1
         }
-      
+
+        // findActiveIndices *already* uses the offset internally to determine focusedLineForWord and activeWordIndex
         const { activeWordIndex, activeLineIndex: focusedLineForWord } = findActiveIndices(currentTime)
-        // console.log(`[UTD findActiveIndices Result] activeWordIndex: ${activeWordIndex}, focusedLineForWord: ${focusedLineForWord}`); // Removed
-        // focusedLineForWord from findActiveIndices is for word highlighting precision within the currentDisplayLineIndex
-      
+
+
         let windowStart, windowEnd
         const anchorIndex = currentDisplayLineIndex !== -1 ? currentDisplayLineIndex : focusedLineForWord !== -1 ? focusedLineForWord : 0
-        // console.log(`[UTD Calculated currentDisplayLineIndex]: ${currentDisplayLineIndex}, anchorIndex: ${anchorIndex}`); // Removed
-      
+
         if (anchorIndex >= 0 && anchorIndex < normalizedLines.length) {
           windowStart = Math.max(0, anchorIndex - lookback)
           windowEnd = Math.min(normalizedLines.length - 1, anchorIndex + lookahead)
@@ -1451,34 +1491,41 @@
           windowEnd = Math.min(normalizedLines.length - 1, lookback + lookahead)
           if (normalizedLines.length === 0) windowEnd = -1 // No lines to display
         }
-        // console.log(`[UTD Window] start: ${windowStart}, end: ${windowEnd}`); // Removed
-      
+
         transcript.innerHTML = ''
         transcript.className = '' // Clear all classes first
         transcript.classList.add(highlightStyleSelect.value) // Add selected highlight style class
-      
+
         for (let i = windowStart; i <= windowEnd; i++) {
           if (i < 0 || i >= normalizedLines.length) continue
-      
+
           const line = normalizedLines[i]
           const div = document.createElement('div')
           div.className = 'cue'
-      
+          div.dataset.lineIndex = i; // ADDED data-line-index attribute
+
           // Apply .current class based on our new currentDisplayLineIndex
           if (i === currentDisplayLineIndex) {
             div.classList.add('current')
           }
-      
+
           let displayText = ''
           // Word highlighting should happen if it's the currentDisplayLineIndex and word level is on.
           if (isWordLevel && i === currentDisplayLineIndex && activeWordIndex !== -1 && cues[activeWordIndex]) {
             // Ensure the activeWordIndex actually belongs to the currentDisplayLineIndex text
+            // The activeWordIndex is already determined by findActiveIndices using the offset.
+            // So, cues[activeWordIndex].fullLineTextClean should correspond to line.text if everything is aligned.
+
             if (cues[activeWordIndex].fullLineTextClean === line.text) {
               const wordsInThisDisplayLine = cues.filter((wordCue) => wordCue.fullLineTextClean === line.text)
               wordsInThisDisplayLine.sort((a, b) => a.startTime - b.startTime)
-      
+
+              // Use the effectiveTime for word highlighting precision
+              const effectiveTimeForWordHighlight = currentTime + userTimingOffset;
+
               wordsInThisDisplayLine.forEach((word) => {
-                const isCurrentWord = currentTime >= word.startTime && currentTime < word.endTime
+                // Check if the word's VTT time falls within the effective audio time
+                const isCurrentWord = effectiveTimeForWordHighlight >= word.startTime && effectiveTimeForWordHighlight < word.endTime
                 if (isCurrentWord) {
                   displayText += `<u>${word.wordText}</u>`
                 } else {
@@ -1494,7 +1541,7 @@
           } else {
             displayText = line.text
           }
-      
+
           div.innerHTML = displayText
           div.addEventListener('click', () => {
             stopTranscriptRenderLoop() // Stop the loop
@@ -1503,103 +1550,106 @@
             audio.addEventListener(
               'seeked',
               function onSeekedAfterLineClick() {
-                // console.log(`[LineClick Seeked] Target: ${line.startTime.toFixed(3)}, Actual: ${audio.currentTime.toFixed(3)}`);
-                updateTranscriptDisplay() // Update with stable currentTime
-                lastAudioCurrentTime = audio.currentTime // Sync lastAudioCurrentTime
-                startTranscriptRenderLoop() // Restart the loop
-                audio.play() // Ensure playback starts/resumes
+                updateTranscriptDisplay(line.startTime); // Immediate update with INTENDED time
+                audio.removeEventListener('seeked', onSeekedAfterLineClick); // Remove self
+
+                // REMOVED settleDelay and setTimeout
+                lastAudioCurrentTime = audio.currentTime;
+                updateTranscriptDisplay();
+                startTranscriptRenderLoop(); // Restart the loop
+                if (audio.paused) audio.play();
               },
               { once: true }
             )
           })
           transcript.appendChild(div)
         }
-      
+
         // Force DOM reflow/repaint
         transcript.style.display = 'none'
         transcript.offsetHeight // Accessing offsetHeight can trigger a reflow
         transcript.style.display = ''
-      
-        const currentLineEl = transcript.querySelector('.cue.current')
-        if (currentLineEl && !userScrolling && !settingsInteractionInProgress) {
-          // Check new flag
-          const now = Date.now()
-          // Check if the visually current line has actually changed
-          if (currentDisplayLineIndex !== lastVisuallyCurrentLineIndex) {
-            // Debounce smooth scroll to once per ~150ms for inter-line transitions
-            if (now - lastSmoothScrollTime > 150) {
-              currentLineEl.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
-              lastSmoothScrollTime = now
-            }
-            lastVisuallyCurrentLineIndex = currentDisplayLineIndex // Update tracker
-          } else if (now - lastAutoScrollTime > 2000 && !audio.paused) {
-            // Periodic recenter only if playing
-            // Periodic recenter (less frequent, auto behavior)
-            currentLineEl.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
-          }
-          if (!audio.paused) {
-            // Only update lastAutoScrollTime if playing, to allow scroll on pause
-            lastAutoScrollTime = now // Update for both cases to manage periodic recenter
-          }
-        }
+
+        // const currentLineEl = transcript.querySelector('.cue.current'); // Entire block removed for disabling autoscroll
+        // if (currentLineEl && !userScrolling && !settingsInteractionInProgress) {
+        //   const now = Date.now();
+        //   const transcriptContainer = document.getElementById('transcript');
+
+        //   const desiredViewportOffset = transcriptContainer.clientHeight * 0.25;
+        //   let targetScrollTop = currentLineEl.offsetTop - desiredViewportOffset;
+        //   targetScrollTop = Math.max(0, targetScrollTop);
+
+        //   if (currentDisplayLineIndex !== lastVisuallyCurrentLineIndex) {
+        //     if (now - lastSmoothScrollTime > 150) {
+        //       transcriptContainer.scrollTo({
+        //         top: targetScrollTop,
+        //         behavior: 'smooth'
+        //       });
+        //       lastSmoothScrollTime = now;
+        //     }
+        //     lastVisuallyCurrentLineIndex = currentDisplayLineIndex;
+        //   } else if (now - lastAutoScrollTime > 2500 && !audio.paused) {
+        //     transcriptContainer.scrollTo({
+        //       top: targetScrollTop,
+        //       behavior: 'auto'
+        //     });
+        //   }
+        //   if (!audio.paused) {
+        //     lastAutoScrollTime = now;
+        //   }
+        // }
       }
-      
+
       function parseTimestamp(timeStr) {
         const parts = timeStr.split(':')
         let seconds = 0
-      
+
         if (parts.length === 2) {
           seconds = parseFloat(parts[0]) * 60 + parseFloat(parts[1])
         } else if (parts.length === 3) {
           seconds = parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2])
         }
-      
+
         return seconds
       }
-      
+
       function getFileUrl(filename) {
         return '/file/' + encodeURIComponent(bookName) + '/' + encodeURIComponent(filename)
       }
-      
-      function loadTrack(index) {
+
+      function loadTrack(index, isAutoplay = false) {
         currentIndex = index
         transcriptDataLoadedForCurrentTrack = false // Reset flag for new track
         stopTranscriptRenderLoop() // Stop loop for old track
-        // if (timeUpdateListener) { // This was for the old RAF-alternative
-        //   audio.removeEventListener('timeupdate', timeUpdateListener)
-        //   timeUpdateListener = null
-        // }
+        stopForceSyncLoop(); // Stop periodic sync for old track
+
         // Remove generic timeupdate listener from old audio object if it exists, before changing src
         audio.removeEventListener('timeupdate', handleGenericTimeUpdate)
-      
+
         const mp3 = tracks[currentIndex]
         audio.src = getFileUrl(mp3)
         trackInfo.textContent = currentIndex + 1 + '/' + tracks.length + ': ' + mp3
-      
+
         // Setup lazy loading for new track
         setupLazyTranscriptLoading()
-      
+
         // Update URL to reflect current track
         const currentUrl = new URL(window.location)
         currentUrl.searchParams.set('file', mp3)
         window.history.replaceState({}, '', currentUrl)
-      
-        // Save current chapter progress
-        saveCurrentChapterProgress(bookName, mp3)
-      
-        // Load saved playback position for this track (async)
-        loadPlaybackPosition().catch((error) => {
-          // console.warn('Failed to load playback position:', error)
+
+        // Load saved playback position for this track (async), passing isAutoplay
+        loadPlaybackPosition(isAutoplay).catch((error) => { // Pass isAutoplay here
         })
       }
-      
+
       function prevChapter() {
         if (currentIndex > 0) loadTrack(currentIndex - 1)
       }
-      
+
       function nextChapter() {
         if (currentIndex < tracks.length - 1) {
-          loadTrack(currentIndex + 1)
+          loadTrack(currentIndex + 1, true)
           // Auto-start playback if autoplay is enabled
           if (autoplayToggle.checked) {
             audio.addEventListener(
@@ -1612,29 +1662,29 @@
           }
         }
       }
-      
+
       async function loadTranscript(mp3) {
         try {
           document.getElementById('status-main-text').textContent = 'Loading transcript...'
           document.getElementById('transcript-stats-container').style.display = 'none'
           transcript.innerHTML = ''
           transcriptDataLoadedForCurrentTrack = false
-      
+
           if (timeUpdateListener) {
             audio.removeEventListener('timeupdate', timeUpdateListener)
             timeUpdateListener = null
           }
-      
+
           const vttUrl = getFileUrl(mp3.replace(/\.mp3$/, '.vtt'))
-      
+
           const response = await fetch(vttUrl)
           if (!response.ok) {
             throw new Error('Failed to fetch VTT: ' + response.status + ' ' + response.statusText)
           }
-      
+
           const vttText = await response.text()
           parseVTTSimple(vttText)
-      
+
           const hasWordHighlighting = cues.some((cue) => cue.wordText && cue.wordText !== cue.fullLineTextClean) // More robust check
           const wordHighlightStatus = document.getElementById('word-highlight-status')
           if (hasWordHighlighting) {
@@ -1644,26 +1694,25 @@
             wordHighlightStatus.textContent = '(estimated timing)'
             wordHighlightStatus.style.color = 'var(--warning-color)'
           }
-      
+
           if (normalizedLines.length === 0) {
             document.getElementById('status-main-text').textContent = 'No transcript content found'
             document.getElementById('transcript-stats-container').style.display = 'none'
             // transcriptDataLoadedForCurrentTrack remains false
             return // Exit if no lines, flag remains false.
           }
-      
+
           const statsTextContent = `(${normalizedLines.length} unique lines, ${cues.length} word cues)`
           document.getElementById('status-main-text').textContent = 'Transcript loaded'
           document.getElementById('transcript-stats-text').textContent = statsTextContent
           document.getElementById('transcript-stats-container').style.display = 'inline-block' // Use inline-block for proper layout with icon
           tooltip.style.display = 'none' // Ensure tooltip is hidden initially
-      
+
           // DO NOT call updateTranscriptDisplay() here directly anymore for the initial load.
           // The 'seeked' event in loadPlaybackPosition will handle the first update for resumes.
           // For tracks starting fresh, the timeupdate listener will pick it up.
           transcriptDataLoadedForCurrentTrack = true
-          // console.log('[LoadTranscript] Transcript loaded and parsed. transcriptDataLoadedForCurrentTrack = true.')
-      
+
           // Instead of direct timeupdate listener, start the render loop
           // audio.addEventListener('timeupdate', timeUpdateListener) // OLD
           startTranscriptRenderLoop() // NEW
@@ -1677,7 +1726,6 @@
           // For example, to save playback position periodically (less frequent than RAF)
           audio.addEventListener('timeupdate', handleGenericTimeUpdate)
         } catch (error) {
-          // console.error('Error loading VTT in loadTranscript:', error)
           document.getElementById('status-main-text').textContent = 'Error loading transcript: ' + error.message
           document.getElementById('transcript-stats-container').style.display = 'none'
           transcript.innerHTML = '<div style="color:red">Error: ' + error.message + '</div>'
@@ -1685,7 +1733,7 @@
           throw error // Re-throw to allow await in loadPlaybackPosition to catch it
         }
       }
-      
+
       // Listener for less frequent time updates (e.g., saving position)
       function handleGenericTimeUpdate() {
         if (Math.floor(audio.currentTime) % 5 === 0 && Math.floor(audio.currentTime) !== Math.floor(lastAudioCurrentTimeForSave)) {
@@ -1694,17 +1742,20 @@
         }
       }
       let lastAudioCurrentTimeForSave = 0 // Companion for handleGenericTimeUpdate
-      
+
       function savePlaybackPosition() {
         if (audio.src && tracks[currentIndex]) {
-          const currentTime = audio.currentTime
-          if (currentTime > 0) {
-            playbackPersistence.savePosition(bookName, tracks[currentIndex], currentTime)
-          }
+            const trackName = tracks[currentIndex];
+            const currentTime = audio.currentTime;
+            if (currentTime > 0) {
+                playbackPersistence.savePosition(bookName, trackName, currentTime);
+                saveCurrentChapterProgress(bookName, trackName);
+            } else {
+            }
         }
-        updateTranscriptDisplay() // Refresh transcript
+        // updateTranscriptDisplay() // REVISIT: Refresh transcript - Removed for now, let RAF handle it mostly.
       }
-      
+
       function setDefaultTimingOffset() {
         timingOffsetSlider.value = 0
         timingOffsetValue.textContent = '0ms'
@@ -1715,24 +1766,132 @@
           settingsInteractionInProgress = false
         }, 0)
       }
-      
+
       function updateMuteIndicator() {
         if (muteIndicator) {
           muteIndicator.style.display = audio.muted ? 'inline' : 'none'
         }
       }
-      
+
       function setDefaultCurrentLineBgOpacity() {
         currentLineBgOpacitySlider.value = 1
         currentLineBgOpacityValue.textContent = '1.00'
         updateCurrentLineStyles()
         savePlayerSettings()
         settingsInteractionInProgress = true
-        updateTranscriptDisplay()
+        updateTranscriptDisplay() // Refresh transcript
         setTimeout(() => {
           settingsInteractionInProgress = false
         }, 0)
       }
+
+      function setDefaultPlaybackSpeed() {
+        audio.playbackRate = 1.0
+        playbackRateSlider.value = 1.0
+        playbackRateDisplay.textContent = '1.0x'
+        savePlayerSettings()
+      }
+
+      function updatePlaybackRateUI() {
+        if (playbackRateSlider && playbackRateDisplay && audio) {
+          const rate = audio.playbackRate;
+          playbackRateSlider.value = rate;
+          playbackRateDisplay.textContent = rate.toFixed(2) + 'x';
+        }
+      }
+
+      function applySpeedJolt() {
+        if (isSpeedJoltActive || Math.abs(audio.playbackRate - 1.0) > 0.001) { // Only apply if rate is 1.0 or jolt not active
+            // If user has already set a custom speed, respect it and don't apply jolt initially.
+            // Or if jolt is already active, don't apply another one.
+            // This condition means jolt mostly applies when resuming at 1.0x speed.
+            // Consider if you want it to apply over custom speeds too.
+            // For now, let's assume it's mainly for the 1.0x desync case after pause/resume.
+            if (Math.abs(audio.playbackRate - 1.0) > 0.001) return;
+            if (isSpeedJoltActive) return;
+        }
+
+        isSpeedJoltActive = true;
+        const originalRateBeforeJolt = audio.playbackRate; // Should be the user's intended rate
+        const joltedRate = originalRateBeforeJolt * 1.01;
+
+        // Only apply if the jolt makes a meaningful difference
+        if (Math.abs(joltedRate - originalRateBeforeJolt) < 0.001) {
+            isSpeedJoltActive = false;
+            return;
+        }
+
+        audio.playbackRate = joltedRate;
+
+        setTimeout(() => {
+            // Only revert if user hasn't changed speed AND jolt was meant to be active for this rate
+            if (isSpeedJoltActive && Math.abs(audio.playbackRate - joltedRate) < 0.001) {
+                audio.playbackRate = originalRateBeforeJolt;
+            }
+            updatePlaybackRateUI(); // Ensure UI reflects the actual rate
+            isSpeedJoltActive = false;
+        }, 5000); // Jolt duration: 5 seconds
+      }
+
+      function startForceSyncLoop() {
+        stopForceSyncLoop(); // Clear any existing timer to prevent duplicates
+        periodicSyncTimer = setInterval(() => {
+          if (!audio.paused && audio.readyState >= 2) { // Only if playing and ready
+            updateTranscriptDisplay(); // Force update based on current audio.currentTime
+            lastAudioCurrentTime = audio.currentTime; // Keep lastAudioCurrentTime in sync for RAF loop
+          }
+        }, 3000); // Every 3 seconds
+      }
+
+      function stopForceSyncLoop() {
+        if (periodicSyncTimer) {
+          clearInterval(periodicSyncTimer);
+          periodicSyncTimer = null;
+        }
+      }
+
+      // This is the CORRECT manualResync function.
+      function manualResync() {
+        if (!audio || !normalizedLines || normalizedLines.length === 0) {
+          return;
+        }
+
+        stopTranscriptRenderLoop();
+        stopForceSyncLoop();
+
+        const rawAudioCurrentTime = audio.currentTime;
+        // findActiveIndices uses the global user-set timing offset internally.
+        const { activeLineIndex } = findActiveIndices(rawAudioCurrentTime);
+
+        if (activeLineIndex !== -1 && activeLineIndex < normalizedLines.length) {
+          const targetLine = normalizedLines[activeLineIndex];
+          if (targetLine && typeof targetLine.startTime === 'number') {
+            const targetLineVTTStartTime = targetLine.startTime;
+
+            audio.currentTime = targetLineVTTStartTime; // Audio seeks to the VTT start of the line deemed current by findActiveIndices.
+
+            audio.addEventListener('seeked', function onSeekedForActiveLineResync() {
+              audio.removeEventListener('seeked', onSeekedForActiveLineResync);
+
+              lastAudioCurrentTime = audio.currentTime;
+              updateTranscriptDisplay(); // Update transcript based on the new, precise audio time.
+
+              startTranscriptRenderLoop();
+              if (!audio.paused) {
+                startForceSyncLoop();
+              }
+            }, { once: true });
+
+          } else {
+            startTranscriptRenderLoop();
+            if (!audio.paused) startForceSyncLoop();
+          }
+        } else {
+          startTranscriptRenderLoop();
+          if (!audio.paused) startForceSyncLoop();
+        }
+      }
+
     </script>
   </body>
 </html>
