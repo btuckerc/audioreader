@@ -26,15 +26,19 @@ While named "audiobook server," it can be used for any collection of MP3 files y
 
 ## Prerequisites
 
-Before running the `setup.sh` script, ensure you have the following installed on your system:
+Before running the `setup.sh` script, ensure you have the following generally available on your system:
 
-*   **Python 3:** The `setup.sh` script specifically uses `python3.11` to create the virtual environment. While other Python 3 versions might work for running the app if manually set up, using Python 3.11 is recommended for compatibility with the setup script.
-*   **`pip`:** The Python package installer (usually comes with Python).
 *   **`bash`:** To execute the `setup.sh` script.
+*   **Standard Build Tools:** If `pyenv` needs to install Python from source (e.g., if a pre-compiled binary isn't available for your system for version `3.11.8`), you'll need standard build tools (like `gcc`, `make`, `libssl-dev`, `zlib1g-dev`, etc., depending on your OS). `pyenv install <version>` usually provides guidance if dependencies are missing.
 *   **`ffmpeg` (and `ffprobe`):**
     *   These are crucial for full application functionality: creating test audio clips for speed tests and getting accurate audio durations.
     *   The `setup.sh` script will check if `ffmpeg` and `ffprobe` are accessible in your system's PATH. If not, it will provide guidance on how to install them for common operating systems.
     *   It is highly recommended to install `ffmpeg` before or immediately after running `setup.sh` if the script indicates they are missing.
+*   **Python Version Management (Recommended: `pyenv`):**
+    *   The `setup.sh` script is designed to work best with `pyenv` ([https://github.com/pyenv/pyenv](https://github.com/pyenv/pyenv)) for managing Python versions. It will attempt to install and use Python `3.11.8` (or the version specified in `PYTHON_VERSION_TARGET` within the script) via `pyenv`.
+    *   If `pyenv` is not found, the script will attempt to use a fallback command `python3.11` to set up the environment.
+    *   If neither `pyenv` can set up the target Python version nor the fallback `python3.11` command is found/functional, the script will guide you on how to proceed (e.g., install `pyenv` or the required Python version manually).
+    *   Having `pip` (Python package installer, usually comes with Python) is implicitly required for the Python installation that `setup.sh` ultimately uses.
 
 ## Installation
 
@@ -46,12 +50,17 @@ Before running the `setup.sh` script, ensure you have the following installed on
     ```
 
 2.  **Run the Setup Script:**
-    This script performs several actions:
-    *   Checks for `ffmpeg` and `ffprobe` and guides you if they are missing.
-    *   Creates a Python virtual environment named `venv` inside the `audioreader` directory using `python3.11`.
-    *   Activates this `venv` *within the script's execution* to install packages.
-    *   Installs the necessary Python packages (`Flask` and `openai-whisper`) into `venv`.
-    *   Provides instructions on how to activate `venv` manually for running the application.
+    This script performs several actions to set up your Python environment and install dependencies:
+    *   **`ffmpeg` Check:** Verifies if `ffmpeg` and `ffprobe` are installed and guides you if they are missing.
+    *   **Python Environment Setup (using `pyenv` if available):**
+        *   If `pyenv` is detected, it attempts to install Python `3.11.8` (or the `PYTHON_VERSION_TARGET` in the script) if not already installed by `pyenv`.
+        *   It then sets this Python version as the local version for the `audioreader` directory by creating/updating a `.python-version` file.
+        *   It uses this `pyenv`-managed Python to create a virtual environment named `venv`.
+        *   If `pyenv` is not found, it attempts to use `python3.11` (the `PYTHON_COMMAND_FALLBACK` in the script) to create the `venv`.
+        *   If Python setup fails, the script will provide an error message and exit.
+    *   **Virtual Environment Activation (for script):** Activates the `venv` *within the script's execution* to install packages correctly.
+    *   **Dependency Installation:** Installs `Flask` and `openai-whisper` (and their dependencies) into `venv` using `pip` from the created virtual environment.
+    *   **Guidance:** Provides clear instructions on how to manually activate `venv` in your terminal for running the application.
 
     Execute the script from the `audioreader` directory:
     ```bash
@@ -73,6 +82,7 @@ Before running the `setup.sh` script, ensure you have the following installed on
     Example folder structure:
     ```
     audioreader/
+    ├── .python-version      (created by setup.sh if pyenv is used)
     ├── app.py
     ├── setup.sh
     ├── books/
@@ -86,6 +96,7 @@ Before running the `setup.sh` script, ensure you have the following installed on
     │       └── ...
     ├── static/
     ├── templates/
+    ├── venv/                (Python virtual environment)
     ├── speed_ratios.json  (created after first speed test)
     ├── audiobooks_app.log (created on first app run)
     ├── README.md
@@ -107,13 +118,14 @@ Before running the `setup.sh` script, ensure you have the following installed on
     source venv/bin/activate  # On macOS/Linux
     # For Windows: venv\Scripts\activate
     ```
-    Your terminal prompt will usually change to indicate that the `venv` is active.
+    Your terminal prompt will usually change to indicate that the `venv` is active. If `pyenv` was used during setup, this `venv` will be using the Python version specified by the `.python-version` file (e.g., `3.11.8`).
 
 3.  **Run the Application:**
     With the `venv` active, start the server:
     ```bash
-    python3 app.py
+    python app.py
     ```
+    *(Using `python` instead of `python3` or `python3.11` is correct here because the activated `venv` ensures `python` points to the virtual environment's interpreter.)*
 
 4.  **Access the Web Interface:**
     You should see a message in your terminal indicating the server is running, typically including a line like:
@@ -164,7 +176,7 @@ Before running the `setup.sh` script, ensure you have the following installed on
 *   **Whisper Model:**
     *   To change the default Whisper model for transcriptions and speed tests, modify the `MODEL` variable at the top of `audioreader/app.py`.
     *   Available models generally include `tiny`, `base`, `small`, `medium`, `large`. Smaller models are faster but less accurate; larger models are more accurate but slower and require more resources.
-    *   Restart the server (`python3 app.py`) after changing the model in `app.py`.
+    *   Restart the server (`python app.py`) after changing the model in `app.py`.
 *   **Parallel Transcription Workers:**
     *   When using "Generate All Missing Transcripts" with the parallel option, the default number of workers is 2. This is set in the `whisper_stream_parallel` function in `app.py` (parameter `max_workers=2`). Modify this value in `app.py` and restart the server if you need a different number of parallel jobs.
 *   **Logging:**
