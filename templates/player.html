@@ -1,0 +1,1738 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ book }} - Player</title>
+    <script>
+      // Apply dark mode class to <html> element before CSS loads
+      ;(function () {
+        try {
+          if (localStorage.getItem('siteWideDarkMode') === 'true') {
+            document.documentElement.classList.add('dark-mode')
+          }
+        } catch (e) {
+          // console.warn('FOUC pre-load script failed:', e); // Intentionally kept commented
+        }
+      })()
+    </script>
+    <style>
+      /* Inline critical CSS variables for FOUC prevention */
+      html.dark-mode {
+        --bg-color: #1a1a1a;
+        --container-bg: #2d2d2d;
+        --text-color: #e0e0e0;
+        --border-color: #444;
+        --button-bg: #404040;
+        --button-hover: #505050;
+        --current-bg: #2a4a6b;
+        --current-border: #5ba0d0;
+        --link-color: #5ba0d0;
+      }
+    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/player.css') }}" />
+    <link rel="prefetch" href="{{ url_for('static', filename='css/book.css') }}" as="style" />
+    <link rel="prefetch" href="{{ url_for('view_book', book=book) }}" as="document" />
+  </head>
+  <body>
+    <div class="mode-controls">
+      <button id="darkModeToggleBtn" onclick="toggleDarkMode()">Dark</button>
+      <button onclick="toggleFocusMode()">Focus</button>
+    </div>
+
+    <div class="container">
+      <h1>{{ book }}</h1>
+
+      <div class="controls">
+        <a href="{{ url_for('view_book', book=book) }}" class="back-link">← Back to chapters</a>
+      </div>
+
+      <div class="settings">
+        <div class="settings-header" onclick="toggleSettings()">
+          <span>Settings</span>
+          <span id="settings-toggle">▼</span>
+        </div>
+        <div class="settings-content" id="settings-content">
+          <div class="settings-grid">
+            <div class="settings-column">
+              <div class="setting-group">
+                <label><input type="checkbox" id="autoplay-toggle" checked />Autoplay next chapter</label>
+              </div>
+
+              <div class="slider-group">
+                <label>
+                  <span>Lookback lines</span>
+                  <span id="lookback-value" class="slider-value">1</span>
+                </label>
+                <input type="range" id="lookback-slider" class="slider" min="0" max="3" value="1" step="1" />
+              </div>
+
+              <div class="slider-group">
+                <label>
+                  <span>Lookahead lines</span>
+                  <span id="lookahead-value" class="slider-value">1</span>
+                </label>
+                <input type="range" id="lookahead-slider" class="slider" min="0" max="3" value="1" step="1" />
+              </div>
+
+              <div class="setting-group">
+                <label><input type="checkbox" id="word-level-toggle" checked />Word-level highlighting</label>
+              </div>
+            </div>
+
+            <div class="settings-column">
+              <div class="slider-group transcript-timing-group">
+                <label>
+                  <span>Transcript Timing Offset</span>
+                  <span id="timing-offset-value" class="slider-value">0ms</span>
+                </label>
+                <div class="slider-with-reset">
+                  <input type="range" id="timing-offset-slider" class="slider" min="-0.5" max="0.5" value="0" step="0.05" />
+                  <button onclick="setDefaultTimingOffset()" class="default-color-btn reset-slider-btn">Reset</button>
+                </div>
+              </div>
+
+              <div class="setting-group">
+                <label>Word highlight style</label>
+                <div class="select-group">
+                  <select id="highlight-style">
+                    <option value="highlight-underline" selected>Underline</option>
+                    <option value="highlight-background">Background</option>
+                    <option value="highlight-bold">Bold</option>
+                    <option value="highlight-italic">Italic</option>
+                    <option value="highlight-border">Border</option>
+                    <option value="highlight-glow">Glow</option>
+                  </select>
+                </div>
+                <span id="word-highlight-status" style="font-size: 12px; color: #666;"></span>
+              </div>
+
+              <div class="setting-group">
+                <label>Word style color</label>
+                <div class="color-input-group">
+                  <input type="color" id="highlight-color" value="#2196f3" />
+                  <button onclick="setDefaultHighlightColor()" class="default-color-btn">Reset</button>
+                </div>
+              </div>
+
+              <div class="setting-group">
+                <label>Current line background</label>
+                <div class="color-input-group">
+                  <input type="color" id="current-line-bg" value="#2196f3" />
+                  <button onclick="setDefaultCurrentLineBg()" class="default-color-btn">Reset Color</button>
+                </div>
+                <div class="slider-group opacity-slider-group">
+                  <label>
+                    <span>Opacity</span>
+                    <span id="current-line-bg-opacity-value" class="slider-value">1.00</span>
+                  </label>
+                  <div class="slider-with-reset">
+                    <input type="range" id="current-line-bg-opacity-slider" class="slider" min="0" max="1" value="1" step="0.01" />
+                    <button onclick="setDefaultCurrentLineBgOpacity()" class="default-color-btn reset-slider-btn">Reset</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="setting-group">
+                <label>Current line outline</label>
+                <div class="color-input-group">
+                  <input type="color" id="current-line-outline" value="#ffffff" />
+                  <div class="thickness-control">
+                    <input type="range" id="current-line-thickness" class="slider thickness-slider" min="0" max="5" value="1" step="1" />
+                    <span id="current-line-thickness-value" class="slider-value">1px</span>
+                  </div>
+                  <button onclick="setDefaultCurrentLineOutline()" class="default-color-btn">Reset</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <audio id="audio" controls></audio>
+
+      <div class="controls">
+        <button onclick="prevChapter()">← Previous</button>
+        <button onclick="nextChapter()">Next →</button>
+        <span id="track-info" class="track-info"></span>
+        <span id="mute-indicator" style="display: none; margin-left: 8px; font-weight: bold; color: var(--warning-color);">(Muted)</span>
+      </div>
+
+      <div id="transcript"></div>
+      <div id="status" class="status">
+        <span id="status-main-text">Loading transcript...</span>
+        <span id="transcript-stats-container" style="display: none; margin-left: 10px; position: relative;">
+          <span id="transcript-info-icon" title="Transcript Details" style="cursor: help; font-weight: bold;">&#9432;</span>
+          <span id="transcript-stats-tooltip" class="tooltip-popup"><span id="transcript-stats-text" style="font-size: 0.9em; margin-left: 4px; font-style: normal;"></span></span>
+        </span>
+      </div>
+    </div>
+
+    <!-- Data script block -->
+    <script>
+      // Global data variables
+      let bookName = '{{ book|e }}'
+      let tracks = []
+      let startTrack = ''
+      let currentIndex = 0
+      
+      // Fetch data via AJAX to avoid template conflicts
+      async function loadPlayerData() {
+        try {
+          const urlParams = new URLSearchParams(window.location.search)
+          const fileParam = urlParams.get('file') || '' // Initial target file, if any
+      
+          // Fetch comprehensive file info for the book
+          const fileInfoResponse = await fetch(`/api/book/${encodeURIComponent(bookName)}/file-info`)
+          if (!fileInfoResponse.ok) {
+            throw new Error(`Failed to fetch book file info: ${fileInfoResponse.status}`)
+          }
+          const allBookFiles = await fileInfoResponse.json()
+      
+          if (Object.keys(allBookFiles).length === 0) {
+            document.getElementById('status-main-text').textContent = 'No audio files found in this book.'
+            return false
+          }
+      
+          // Filter for tracks that have VTT files
+          tracks = Object.keys(allBookFiles).filter((filename) => allBookFiles[filename].vtt_exists)
+          tracks.sort() // Ensure consistent order, though list_mp3s on server also sorts
+      
+          if (tracks.length === 0) {
+            document.getElementById('status-main-text').textContent = 'No captioned tracks available for this book.'
+            return false
+          }
+      
+          // Determine the starting track
+          if (fileParam && tracks.includes(fileParam)) {
+            startTrack = fileParam
+          } else if (tracks.length > 0) {
+            startTrack = tracks[0] // Default to the first track with a VTT
+          } else {
+            // This case should be covered by the tracks.length === 0 check above, but as a fallback:
+            document.getElementById('status-main-text').textContent = 'Error: No valid starting track found.'
+            return false
+          }
+      
+          currentIndex = tracks.indexOf(startTrack)
+          if (currentIndex < 0) currentIndex = 0 // Should not happen if logic above is correct
+      
+          return true
+        } catch (error) {
+          // console.error('Error loading player data:', error);
+          document.getElementById('status-main-text').textContent = 'Error loading player data: ' + error.message
+          return false
+        }
+      }
+    </script>
+
+    <script>
+      const audio = document.getElementById('audio')
+      const transcript = document.getElementById('transcript')
+      const status = document.getElementById('status')
+      const trackInfo = document.getElementById('track-info')
+      const autoplayToggle = document.getElementById('autoplay-toggle')
+      const lookbackSlider = document.getElementById('lookback-slider')
+      const lookaheadSlider = document.getElementById('lookahead-slider')
+      const lookbackValue = document.getElementById('lookback-value')
+      const lookaheadValue = document.getElementById('lookahead-value')
+      const highlightStyleSelect = document.getElementById('highlight-style')
+      const wordLevelToggle = document.getElementById('word-level-toggle')
+      const highlightColorInput = document.getElementById('highlight-color')
+      const darkModeButton = document.getElementById('darkModeToggleBtn')
+      const currentLineBgInput = document.getElementById('current-line-bg')
+      const currentLineOutlineInput = document.getElementById('current-line-outline')
+      const currentLineThicknessSlider = document.getElementById('current-line-thickness')
+      const currentLineThicknessValue = document.getElementById('current-line-thickness-value')
+      const timingOffsetSlider = document.getElementById('timing-offset-slider')
+      const timingOffsetValue = document.getElementById('timing-offset-value')
+      const currentLineBgOpacitySlider = document.getElementById('current-line-bg-opacity-slider')
+      const currentLineBgOpacityValue = document.getElementById('current-line-bg-opacity-value')
+      const muteIndicator = document.getElementById('mute-indicator')
+      
+      let cues = []
+      let normalizedLines = [] // Clean, deduplicated lines for display
+      let cueToLineMap = new Map() // Maps cue indices to normalized line indices
+      let lastHighlightedWord = null
+      let lastHighlightTime = 0
+      let userScrolling = false // Track if user is manually scrolling
+      let scrollTimeout = null // Timeout for scroll detection
+      let lastAutoScrollTime = 0 // Track when we last auto-scrolled
+      let lastLoggedTime = 0
+      let lastLoggedCue = null
+      let transcriptDataLoadedForCurrentTrack = false // New flag
+      let timeUpdateListener = null // To keep track of the listener
+      let lastVisuallyCurrentLineIndex = -1 // To track change for smooth scroll
+      let lastSmoothScrollTime = 0 // To debounce smooth scroll
+      let rafLoopRunning = false
+      let lastAudioCurrentTime = 0
+      let settingsInteractionInProgress = false // New flag
+      
+      // Tooltip logic
+      const infoIcon = document.getElementById('transcript-info-icon')
+      const tooltip = document.getElementById('transcript-stats-tooltip')
+      
+      if (infoIcon && tooltip) {
+        infoIcon.addEventListener('mouseenter', () => {
+          tooltip.style.display = 'block'
+        })
+        infoIcon.addEventListener('mouseleave', () => {
+          tooltip.style.display = 'none'
+        })
+        infoIcon.addEventListener('focus', () => {
+          // For keyboard accessibility
+          tooltip.style.display = 'block'
+        })
+        infoIcon.addEventListener('blur', () => {
+          // For keyboard accessibility
+          tooltip.style.display = 'none'
+        })
+        // Optional: click to toggle, useful for touch devices
+        infoIcon.addEventListener('click', (event) => {
+          event.stopPropagation() // Prevent event from bubbling up
+          tooltip.style.display = tooltip.style.display === 'block' ? 'none' : 'block'
+        })
+      }
+      
+      // Update dark mode button text
+      function updateDarkModeButton() {
+        darkModeButton.textContent = document.documentElement.classList.contains('dark-mode') ? 'Light' : 'Dark'
+      }
+      
+      // Slider value updates
+      lookbackSlider.addEventListener('input', function () {
+        lookbackValue.textContent = this.value
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateTranscriptDisplay()
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      })
+      
+      lookaheadSlider.addEventListener('input', function () {
+        lookaheadValue.textContent = this.value
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateTranscriptDisplay()
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      })
+      
+      timingOffsetSlider.addEventListener('input', function () {
+        timingOffsetValue.textContent = (parseFloat(this.value) * 1000).toFixed(0) + 'ms'
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateTranscriptDisplay() // Refresh transcript with new offset
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      })
+      
+      highlightStyleSelect.addEventListener('change', function () {
+        // If the current color was a default for the current theme (for ANY style),
+        // then update to the default for the NEW style in the current theme.
+        const currentHighlightColor = highlightColorInput.value.toLowerCase()
+        const isDarkMode = document.documentElement.classList.contains('dark-mode')
+      
+        const lightModeBackgroundDefault = '#ffeb3b'
+        const lightModeOtherDefault = '#1976d2'
+        const darkModeBackgroundDefault = '#ffd700'
+        const darkModeOtherDefault = '#ffa726'
+      
+        let wasADefaultColor = false
+        if (isDarkMode) {
+          if (currentHighlightColor === darkModeBackgroundDefault || currentHighlightColor === darkModeOtherDefault) {
+            wasADefaultColor = true
+          }
+        } else {
+          if (currentHighlightColor === lightModeBackgroundDefault || currentHighlightColor === lightModeOtherDefault) {
+            wasADefaultColor = true
+          }
+        }
+      
+        if (wasADefaultColor) {
+          setDefaultHighlightColor() // This will use the new style from highlightStyleSelect.value
+        } else {
+          // If it wasn't a default, just save settings and update display as the style has changed
+          // The color itself remains custom.
+          savePlayerSettings()
+          settingsInteractionInProgress = true
+          updateTranscriptDisplay() // Re-render to apply new style class if needed
+          setTimeout(() => {
+            settingsInteractionInProgress = false
+          }, 0)
+        }
+      })
+      
+      wordLevelToggle.addEventListener('change', function () {
+        // localStorage.setItem('wordLevel', this.checked); // Removed, saved in playerSettings
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateTranscriptDisplay()
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      })
+      
+      highlightColorInput.addEventListener('input', function () {
+        // localStorage.setItem('highlightColor', this.value); // Removed, saved in playerSettings
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateHighlightColor()
+        updateTranscriptDisplay()
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      })
+      
+      autoplayToggle.addEventListener('change', function () {
+        savePlayerSettings()
+      })
+      
+      currentLineBgInput.addEventListener('input', function () {
+        updateCurrentLineStyles()
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateTranscriptDisplay() // It's good to update if background/outline changes affect visibility
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      })
+      
+      currentLineOutlineInput.addEventListener('input', function () {
+        updateCurrentLineStyles()
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateTranscriptDisplay()
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      })
+      
+      currentLineThicknessSlider.addEventListener('input', function () {
+        currentLineThicknessValue.textContent = this.value + 'px'
+        updateCurrentLineStyles()
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateTranscriptDisplay()
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      })
+      
+      currentLineBgOpacitySlider.addEventListener('input', function () {
+        currentLineBgOpacityValue.textContent = parseFloat(this.value).toFixed(2)
+        updateCurrentLineStyles()
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateTranscriptDisplay()
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      })
+      
+      function savePlayerSettings() {
+        const settings = {
+          autoplay: autoplayToggle.checked,
+          lookback: parseInt(lookbackSlider.value),
+          lookahead: parseInt(lookaheadSlider.value),
+          highlightStyle: highlightStyleSelect.value,
+          wordLevel: wordLevelToggle.checked,
+          highlightColor: highlightColorInput.value,
+          focusMode: document.documentElement.classList.contains('focus-mode'),
+          currentLineBg: currentLineBgInput.value,
+          currentLineOutline: currentLineOutlineInput.value,
+          currentLineThickness: parseInt(currentLineThicknessSlider.value),
+          timingOffset: parseFloat(timingOffsetSlider.value),
+          currentLineBgOpacity: parseFloat(currentLineBgOpacitySlider.value),
+          audioVolume: audio.volume,
+          audioMuted: audio.muted
+        }
+        localStorage.setItem('playerSettings', JSON.stringify(settings))
+      }
+      
+      // Enhanced playback persistence with cross-tab sync
+      class PlaybackPersistence {
+        constructor() {
+          this.dbName = 'AudiobookPlayer'
+          this.storeName = 'playback'
+          this.version = 1
+          this.db = null
+          this.initDB()
+        }
+      
+        async initDB() {
+          try {
+            this.db = await new Promise((resolve, reject) => {
+              const request = indexedDB.open(this.dbName, this.version)
+      
+              request.onerror = () => reject(request.error)
+              request.onsuccess = () => resolve(request.result)
+      
+              request.onupgradeneeded = (event) => {
+                const db = event.target.result
+                if (!db.objectStoreNames.contains(this.storeName)) {
+                  const store = db.createObjectStore(this.storeName, { keyPath: 'id' })
+                  store.createIndex('book', 'book', { unique: false })
+                  store.createIndex('timestamp', 'timestamp', { unique: false })
+                }
+              }
+            })
+          } catch (error) {
+            // console.warn('IndexedDB not available, falling back to localStorage:', error);
+            this.db = null
+          }
+        }
+      
+        async savePosition(book, track, currentTime) {
+          const position = {
+            id: `${book}:${track}`,
+            book: book,
+            track: track,
+            currentTime: currentTime,
+            timestamp: Date.now()
+          }
+      
+          // Save to IndexedDB if available
+          if (this.db) {
+            try {
+              const transaction = this.db.transaction([this.storeName], 'readwrite')
+              const store = transaction.objectStore(this.storeName)
+              await store.put(position)
+            } catch (error) {
+              // console.warn('IndexedDB save failed, using localStorage:', error)
+              this.saveToLocalStorage(position)
+            }
+          } else {
+            this.saveToLocalStorage(position)
+          }
+      
+          // Save to localStorage for immediate access and cross-tab sync
+          this.saveToLocalStorage(position)
+      
+          // Broadcast to other tabs
+          window.postMessage(
+            {
+              type: 'playbackPositionUpdate',
+              position: position
+            },
+            '*'
+          )
+        }
+      
+        saveToLocalStorage(position) {
+          localStorage.setItem('playbackPosition', JSON.stringify(position))
+          localStorage.setItem(`playbackPosition:${position.book}:${position.track}`, JSON.stringify(position))
+        }
+      
+        async loadPosition(book, track) {
+          // Try IndexedDB first
+          if (this.db) {
+            try {
+              const transaction = this.db.transaction([this.storeName], 'readonly')
+              const store = transaction.objectStore(this.storeName)
+              const request = store.get(`${book}:${track}`)
+              const result = await new Promise((resolve, reject) => {
+                request.onsuccess = () => resolve(request.result)
+                request.onerror = () => reject(request.error)
+              })
+      
+              if (result && this.isPositionValid(result)) {
+                return result
+              }
+            } catch (error) {
+              // console.warn('IndexedDB load failed, using localStorage:', error)
+            }
+          }
+      
+          // Fallback to localStorage
+          const specificKey = `playbackPosition:${book}:${track}`
+          const specificSaved = localStorage.getItem(specificKey)
+          if (specificSaved) {
+            try {
+              const position = JSON.parse(specificSaved)
+              if (this.isPositionValid(position)) {
+                return position
+              }
+            } catch (e) {
+              // console.warn('Error parsing specific position:', e)
+            }
+          }
+      
+          // Fallback to general position if same book/track
+          const generalSaved = localStorage.getItem('playbackPosition')
+          if (generalSaved) {
+            try {
+              const position = JSON.parse(generalSaved)
+              if (position.book === book && position.track === track && this.isPositionValid(position)) {
+                return position
+              }
+            } catch (e) {
+              // console.warn('Error parsing general position:', e)
+            }
+          }
+      
+          return null
+        }
+      
+        isPositionValid(position) {
+          return position && position.currentTime > 0 && position.timestamp && Date.now() - position.timestamp < 24 * 60 * 60 * 1000 // 24 hours
+        }
+      
+        async saveCurrentChapter(book, chapter) {
+          const progress = {
+            id: `chapter:${book}`,
+            book: book,
+            currentChapter: chapter,
+            timestamp: Date.now()
+          }
+      
+          if (this.db) {
+            try {
+              const transaction = this.db.transaction([this.storeName], 'readwrite')
+              const store = transaction.objectStore(this.storeName)
+              await store.put(progress)
+            } catch (error) {
+              // console.warn('IndexedDB chapter save failed:', error)
+            }
+          }
+      
+          localStorage.setItem('chapterProgress', JSON.stringify(progress))
+        }
+      }
+      
+      // Initialize playback persistence
+      const playbackPersistence = new PlaybackPersistence()
+      
+      // Enhanced playback position save/load functions
+      async function loadPlaybackPosition() {
+        if (!tracks[currentIndex]) {
+          return
+        }
+      
+        if (!transcriptDataLoadedForCurrentTrack) {
+          try {
+            await loadTranscript(tracks[currentIndex]) // Await its completion. loadTranscript will set the flag.
+          } catch (error) {
+            // console.error('[LPBP] Error awaiting loadTranscript in loadPlaybackPosition:', error)
+            return
+          }
+        }
+        // At this point, transcriptDataLoadedForCurrentTrack should be true if loadTranscript succeeded.
+      
+        const position = await playbackPersistence.loadPosition(bookName, tracks[currentIndex])
+      
+        if (position && position.currentTime > 0) {
+          const setPositionAndUpdate = () => {
+            if (audio.readyState >= 2 && position.currentTime < audio.duration) {
+              audio.addEventListener(
+                'seeked',
+                function onSeeked() {
+                  // console.log(`[LPBP Seeked] Target: ${position.currentTime.toFixed(3)}, Actual: ${audio.currentTime.toFixed(3)}`);
+                  updateTranscriptDisplay() // Use live audio.currentTime after seek
+                  lastAudioCurrentTime = audio.currentTime // Sync lastAudioCurrentTime
+                  audio.removeEventListener('seeked', onSeeked) // Clean up listener
+                },
+                { once: true }
+              )
+              audio.currentTime = position.currentTime
+            } else if (audio.readyState < 2) {
+              audio.addEventListener(
+                'loadeddata',
+                function onLoadedData() {
+                  if (position.currentTime < audio.duration) {
+                    audio.addEventListener(
+                      'seeked',
+                      function onSeekedAfterLoad() {
+                        // console.log(`[LPBP SeekedAfterLoad] Target: ${position.currentTime.toFixed(3)}, Actual: ${audio.currentTime.toFixed(3)}`);
+                        updateTranscriptDisplay() // Use live audio.currentTime after seek
+                        lastAudioCurrentTime = audio.currentTime // Sync lastAudioCurrentTime
+                        audio.removeEventListener('seeked', onSeekedAfterLoad)
+                      },
+                      { once: true }
+                    )
+                    audio.currentTime = position.currentTime
+                  }
+                  audio.removeEventListener('loadeddata', onLoadedData)
+                },
+                { once: true }
+              )
+            }
+          }
+          setPositionAndUpdate()
+        }
+      }
+      
+      function saveCurrentChapterProgress(book, chapter) {
+        playbackPersistence.saveCurrentChapter(book, chapter)
+      }
+      
+      // Listen for playback position updates from other tabs
+      window.addEventListener('message', function (event) {
+        if (event.data.type === 'playbackPositionUpdate') {
+          const position = event.data.position
+          if (position.book === bookName && position.track === tracks[currentIndex]) {
+            // Update current playback if we're on the same track
+            if (Math.abs(audio.currentTime - position.currentTime) > 2) {
+              audio.currentTime = position.currentTime
+            }
+          }
+        }
+      })
+      
+      function setDefaultHighlightColor() {
+        const isDarkMode = document.documentElement.classList.contains('dark-mode')
+        const selectedStyle = highlightStyleSelect.value
+        let defaultColor = ''
+      
+        // console.log(`[setDefaultHighlightColor] Entry. Selected Style: "${selectedStyle}", Is Dark Mode: ${isDarkMode}`);
+      
+        if (selectedStyle === 'highlight-background') {
+          if (isDarkMode) {
+            defaultColor = '#ffd700' // Background DARK = Gold
+          } else {
+            defaultColor = '#ffeb3b' // Background LIGHT = Yellow
+          }
+        } else {
+          // For other styles (underline, bold, italic, border, glow)
+          if (isDarkMode) {
+            defaultColor = '#ffa726' // Other styles DARK = Orange
+          } else {
+            defaultColor = '#1976d2' // Other styles LIGHT = Blue
+          }
+        }
+      
+        // console.log(`[setDefaultHighlightColor] Chosen Default Color: "${defaultColor}" for style "${selectedStyle}"`);
+      
+        highlightColorInput.value = defaultColor
+        settingsInteractionInProgress = true
+        updateHighlightColor()
+        savePlayerSettings()
+        updateTranscriptDisplay()
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      }
+      
+      function setDefaultCurrentLineBg() {
+        const isDarkMode = document.documentElement.classList.contains('dark-mode')
+        const defaultColor = isDarkMode ? '#2a4a6b' : '#e6f3ff'
+      
+        currentLineBgInput.value = defaultColor
+        // Opacity is NOT reset here, respecting the user's current opacity setting.
+        // currentLineBgOpacitySlider.value = 1;
+        // currentLineBgOpacityValue.textContent = '1.00';
+      
+        settingsInteractionInProgress = true
+        updateCurrentLineStyles()
+        savePlayerSettings()
+        updateTranscriptDisplay()
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      }
+      
+      function setDefaultCurrentLineOutline() {
+        // Default to no outline for cleaner appearance
+        const isDarkMode = document.documentElement.classList.contains('dark-mode')
+        const defaultColor = isDarkMode ? '#ffffff' : '#000000'
+      
+        currentLineOutlineInput.value = defaultColor
+        currentLineThicknessSlider.value = 0 // Default to no outline
+        currentLineThicknessValue.textContent = '0px'
+        settingsInteractionInProgress = true
+        updateCurrentLineStyles()
+        updateTranscriptDisplay() // To see change immediately
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      }
+      
+      function updateCurrentLineStyles() {
+        const hexColor = currentLineBgInput.value
+        const alpha = parseFloat(currentLineBgOpacitySlider.value)
+        const outlineColor = currentLineOutlineInput.value
+        const thickness = currentLineThicknessSlider.value
+      
+        const bgColorRgba = hexToRgba(hexColor, alpha)
+      
+        document.documentElement.style.setProperty('--current-line-bg', bgColorRgba)
+        document.documentElement.style.setProperty('--current-line-outline', outlineColor)
+        document.documentElement.style.setProperty('--current-line-thickness', thickness)
+      }
+      
+      function hexToRgba(hex, alpha) {
+        let r = 0,
+          g = 0,
+          b = 0
+        // 3 digits
+        if (hex.length == 4) {
+          r = parseInt(hex[1] + hex[1], 16)
+          g = parseInt(hex[2] + hex[2], 16)
+          b = parseInt(hex[3] + hex[3], 16)
+        }
+        // 6 digits
+        else if (hex.length == 7) {
+          r = parseInt(hex[1] + hex[2], 16)
+          g = parseInt(hex[3] + hex[4], 16)
+          b = parseInt(hex[5] + hex[6], 16)
+        }
+        return `rgba(${r},${g},${b},${alpha})`
+      }
+      
+      function loadPlayerSettings() {
+        const saved = localStorage.getItem('playerSettings')
+        if (saved) {
+          try {
+            const settings = JSON.parse(saved)
+      
+            // Restore autoplay
+            if (settings.autoplay !== undefined) {
+              autoplayToggle.checked = settings.autoplay
+            }
+      
+            // Restore lookback/lookahead
+            if (settings.lookback !== undefined) {
+              lookbackSlider.value = settings.lookback
+              lookbackValue.textContent = settings.lookback
+            }
+            if (settings.lookahead !== undefined) {
+              lookaheadSlider.value = settings.lookahead
+              lookaheadValue.textContent = settings.lookahead
+            }
+      
+            // Restore timing offset
+            if (settings.timingOffset !== undefined) {
+              timingOffsetSlider.value = settings.timingOffset
+              timingOffsetValue.textContent = (parseFloat(settings.timingOffset) * 1000).toFixed(0) + 'ms'
+            } else {
+              // Default timing offset if not saved
+              timingOffsetSlider.value = 0 // Default to 0
+              timingOffsetValue.textContent = '0ms'
+            }
+      
+            // Restore highlight style
+            if (settings.highlightStyle) {
+              highlightStyleSelect.value = settings.highlightStyle
+            }
+      
+            // Restore word level toggle
+            if (settings.wordLevel !== undefined) {
+              wordLevelToggle.checked = settings.wordLevel
+            }
+      
+            // Restore highlight color
+            if (settings.highlightColor) {
+              highlightColorInput.value = settings.highlightColor
+              updateHighlightColor()
+            }
+      
+            // Restore focus mode (dark mode handled by unified system)
+            if (settings.focusMode) {
+              document.documentElement.classList.add('focus-mode')
+            }
+      
+            // Restore current line styling
+            if (settings.currentLineBg) {
+              currentLineBgInput.value = settings.currentLineBg
+            } else {
+              // Set default based on current theme
+              setDefaultCurrentLineBg()
+            }
+            if (settings.currentLineOutline) {
+              currentLineOutlineInput.value = settings.currentLineOutline
+            } else {
+              // Set default based on current theme
+              const isDarkMode = document.documentElement.classList.contains('dark-mode')
+              const defaultOutlineColor = isDarkMode ? '#ffffff' : '#000000'
+              currentLineOutlineInput.value = defaultOutlineColor
+            }
+            if (settings.currentLineThickness !== undefined) {
+              currentLineThicknessSlider.value = settings.currentLineThickness
+              currentLineThicknessValue.textContent = settings.currentLineThickness + 'px'
+            } else {
+              // Default to no outline
+              currentLineThicknessSlider.value = 0
+              currentLineThicknessValue.textContent = '0px'
+            }
+            if (settings.currentLineBgOpacity !== undefined) {
+              // Load saved opacity
+              currentLineBgOpacitySlider.value = settings.currentLineBgOpacity
+              currentLineBgOpacityValue.textContent = parseFloat(settings.currentLineBgOpacity).toFixed(2)
+            } else {
+              // Default if not saved
+              currentLineBgOpacitySlider.value = 1
+              currentLineBgOpacityValue.textContent = '1.00'
+            }
+      
+            // Apply current line styles
+            updateCurrentLineStyles()
+      
+            // Restore volume and mute state
+            if (settings.audioVolume !== undefined) {
+              audio.volume = settings.audioVolume
+            }
+            if (settings.audioMuted !== undefined) {
+              audio.muted = settings.audioMuted
+            }
+            updateMuteIndicator() // Update display based on loaded settings
+          } catch (e) {
+            // console.error('Error loading player settings:', e)
+          }
+        } else {
+          // No saved settings, set defaults
+          setDefaultCurrentLineBg()
+          setDefaultCurrentLineOutline()
+        }
+      
+        // Update dark mode button text after settings are loaded
+        updateDarkModeButton()
+      }
+      
+      function updateHighlightColor() {
+        const color = highlightColorInput.value
+        document.documentElement.style.setProperty('--highlight-color', color)
+      }
+      
+      function toggleSettings() {
+        const content = document.getElementById('settings-content')
+        const toggle = document.getElementById('settings-toggle')
+      
+        if (content.classList.contains('open')) {
+          // === CLOSING ===
+          stopTranscriptRenderLoop()
+          settingsInteractionInProgress = true
+      
+          content.classList.remove('open') // Trigger layout change
+          toggle.textContent = '▼'
+      
+          // Defer transcript updates until after the browser has likely processed the layout change
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              // Second frame for more safety
+              updateTranscriptDisplay()
+              lastAudioCurrentTime = audio.currentTime
+              startTranscriptRenderLoop()
+              settingsInteractionInProgress = false
+            })
+          })
+        } else {
+          // === OPENING ===
+          content.classList.add('open')
+          toggle.textContent = '▲'
+        }
+      }
+      
+      function toggleDarkMode() {
+        const oldIsDarkMode = document.documentElement.classList.contains('dark-mode')
+        document.documentElement.classList.toggle('dark-mode')
+        const newIsDarkMode = document.documentElement.classList.contains('dark-mode')
+        localStorage.setItem('siteWideDarkMode', newIsDarkMode)
+        updateDarkModeButton()
+      
+        // --- Word Highlight Color ---
+        const currentHighlightColor = highlightColorInput.value.toLowerCase()
+        const selectedHighlightStyle = highlightStyleSelect.value
+        let oldThemeDefaultHighlightColor
+      
+        if (selectedHighlightStyle === 'highlight-background') {
+          if (oldIsDarkMode) {
+            oldThemeDefaultHighlightColor = '#ffd700' // Background DARK = Gold
+          } else {
+            oldThemeDefaultHighlightColor = '#ffeb3b' // Background LIGHT = Yellow
+          }
+        } else {
+          // For other styles (underline, bold, italic, border, glow)
+          if (oldIsDarkMode) {
+            oldThemeDefaultHighlightColor = '#ffa726' // Other styles DARK = Orange
+          } else {
+            oldThemeDefaultHighlightColor = '#1976d2' // Other styles LIGHT = Blue
+          }
+        }
+      
+        if (currentHighlightColor === oldThemeDefaultHighlightColor) {
+          setDefaultHighlightColor()
+        }
+      
+        // --- Current Line Background Color & Opacity ---
+        const currentLineBg = currentLineBgInput.value.toLowerCase()
+        const lightLineBgDefault = '#e6f3ff'
+        const darkLineBgDefault = '#2a4a6b'
+      
+        if ((oldIsDarkMode && currentLineBg === darkLineBgDefault) || (!oldIsDarkMode && currentLineBg === lightLineBgDefault)) {
+          setDefaultCurrentLineBg() // This will now preserve opacity
+        }
+      
+        const currentLineOutlineColor = currentLineOutlineInput.value.toLowerCase()
+        const currentLineOutlineThickness = parseInt(currentLineThicknessSlider.value)
+        const lightLineOutlineDefaultColor = '#000000'
+        const darkLineOutlineDefaultColor = '#ffffff'
+        const defaultLineOutlineThickness = 0
+      
+        if (((oldIsDarkMode && currentLineOutlineColor === darkLineOutlineDefaultColor) || (!oldIsDarkMode && currentLineOutlineColor === lightLineOutlineDefaultColor)) && currentLineOutlineThickness === defaultLineOutlineThickness) {
+          setDefaultCurrentLineOutline()
+        } else if ((oldIsDarkMode && currentLineOutlineColor === darkLineOutlineDefaultColor) || (!oldIsDarkMode && currentLineOutlineColor === lightLineOutlineDefaultColor)) {
+          currentLineOutlineInput.value = newIsDarkMode ? darkLineOutlineDefaultColor : lightLineOutlineDefaultColor
+          updateCurrentLineStyles()
+        }
+      
+        savePlayerSettings()
+        window.postMessage({ type: 'darkModeChange', darkMode: newIsDarkMode }, '*')
+      }
+      
+      function toggleFocusMode() {
+        document.documentElement.classList.toggle('focus-mode')
+        // localStorage.setItem('focusMode', document.documentElement.classList.contains('focus-mode')) // Removed, saved in playerSettings
+        savePlayerSettings()
+      }
+      
+      function applySiteWideDarkMode() {
+        const isDarkMode = localStorage.getItem('siteWideDarkMode') === 'true'
+        if (isDarkMode) {
+          document.documentElement.classList.add('dark-mode')
+        } else {
+          document.documentElement.classList.remove('dark-mode')
+        }
+        updateDarkModeButton()
+      }
+      
+      // Listen for dark mode changes from other tabs
+      window.addEventListener('message', function (event) {
+        if (event.data.type === 'darkModeChange') {
+          if (event.data.darkMode) {
+            document.documentElement.classList.add('dark-mode')
+          } else {
+            document.documentElement.classList.remove('dark-mode')
+          }
+          updateDarkModeButton()
+        }
+      })
+      
+      // Listen for storage changes (for cross-tab sync)
+      window.addEventListener('storage', function (event) {
+        if (event.key === 'siteWideDarkMode') {
+          applySiteWideDarkMode()
+        }
+      })
+      
+      // ULTRA-FAST LOADING - Absolute minimum to show page
+      window.addEventListener('DOMContentLoaded', function () {
+        applySiteWideDarkMode() // Apply dark mode ASAP
+      
+        loadPlayerData()
+          .then((playerDataSuccess) => {
+            if (playerDataSuccess) {
+              showBasicPlayerInterface() // Setup basic player elements
+              // Defer non-critical initializations slightly
+              setTimeout(() => initializePlayerFeatures(), 0)
+            } else {
+              // Handle player data loading failure, e.g., show an error message
+              document.getElementById('status-main-text').textContent = 'Fatal Error: Could not load player data.'
+            }
+          })
+          .catch((error) => {
+            // console.error('Fatal Error during player data loading:', error)
+            document.getElementById('status-main-text').textContent = 'Fatal Error: Player initialization failed.'
+          })
+      })
+      
+      function initializePlayerFeatures() {
+        // Load all features in ultra-lazy chunks
+        setTimeout(loadPlayerSettings, 10)
+        setTimeout(setupEventListeners, 20)
+        setTimeout(setupLazyTranscriptLoading, 30) // This will trigger loadTranscript when needed
+      }
+      
+      function showBasicPlayerInterface() {
+        const mp3 = tracks[currentIndex]
+        audio.src = getFileUrl(mp3)
+        trackInfo.textContent = currentIndex + 1 + '/' + tracks.length + ': ' + mp3
+      
+        document.getElementById('status-main-text').textContent = 'Ready to play'
+        document.getElementById('transcript-stats-container').style.display = 'none'
+      
+        transcript.innerHTML = '<div style="text-align: center; padding: 40px; opacity: 0.7;">🎧 Start playing to see transcript</div>'
+      
+        const currentUrl = new URL(window.location)
+        currentUrl.searchParams.set('file', mp3)
+        window.history.replaceState({}, '', currentUrl)
+      
+        saveCurrentChapterProgress(bookName, mp3)
+      
+        // Defer loadPlaybackPosition slightly to ensure audio element is ready and other setups.
+        setTimeout(() => {
+          loadPlaybackPosition().catch((error) => {
+            // console.warn('[SBPI] Failed to load playback position:', error)
+          })
+        }, 50) // Slightly increased delay to ensure audio element properties are stable
+      }
+      
+      function setupEventListeners() {
+        // Auto-advance to next chapter when current ends
+        audio.addEventListener('ended', function () {
+          if (autoplayToggle.checked) {
+            nextChapter()
+          }
+        })
+      
+        // Force transcript update on play/pause to handle rapid toggles
+        audio.addEventListener('play', function () {
+          lastAudioCurrentTime = audio.currentTime // Set this first
+          updateTranscriptDisplay()
+        })
+      
+        audio.addEventListener('pause', function () {
+          lastAudioCurrentTime = audio.currentTime // Set this first
+          updateTranscriptDisplay()
+        })
+      
+        // Save playback position periodically and on pause/seek
+        audio.addEventListener('timeupdate', function () {
+          // Save position every 5 seconds to avoid excessive localStorage writes
+          if (Math.floor(audio.currentTime) % 5 === 0) {
+            savePlaybackPosition()
+          }
+        })
+      
+        audio.addEventListener('pause', savePlaybackPosition)
+        audio.addEventListener('seeked', savePlaybackPosition)
+      
+        // Smart scroll detection to respect user interaction
+        let scrollDetectionTimeout = null
+      
+        transcript.addEventListener(
+          'scroll',
+          function () {
+            userScrolling = true
+            clearTimeout(scrollDetectionTimeout)
+            // Reset user scrolling flag after a delay (user stopped scrolling)
+            // Only set timeout if audio is playing
+            if (!audio.paused) {
+              scrollDetectionTimeout = setTimeout(() => {
+                userScrolling = false
+              }, 2000) // 2 seconds of no scrolling before resuming auto-scroll
+            }
+          },
+          { passive: true }
+        )
+      
+        // Detect manual scroll via mouse wheel, touch, or keyboard
+        transcript.addEventListener(
+          'wheel',
+          function () {
+            userScrolling = true
+            clearTimeout(scrollDetectionTimeout)
+            if (!audio.paused) {
+              scrollDetectionTimeout = setTimeout(() => {
+                userScrolling = false
+              }, 2000)
+            }
+          },
+          { passive: true }
+        )
+      
+        transcript.addEventListener(
+          'touchmove',
+          function () {
+            userScrolling = true
+            clearTimeout(scrollDetectionTimeout)
+            if (!audio.paused) {
+              scrollDetectionTimeout = setTimeout(() => {
+                userScrolling = false
+              }, 2000)
+            }
+          },
+          { passive: true }
+        )
+      
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function (e) {
+          if (document.activeElement === audio) {
+            // If audio player has focus, don't override its space/arrow keys
+            if (e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') return
+          }
+      
+          if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') {
+            // Don't interfere with input fields
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') return // Allow arrow keys for text input navigation
+          }
+      
+          if (e.key === 'ArrowRight' || e.key === 'n') nextChapter()
+          if (e.key === 'ArrowLeft' || e.key === 'p') prevChapter()
+          if (e.key === 'f' || e.key === 'F') toggleFocusMode()
+          if (e.key === ' ') {
+            e.preventDefault()
+            if (audio.paused) audio.play()
+            else audio.pause()
+          }
+      
+          // Arrow keys in transcript indicate user manual navigation
+          if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
+            if (document.activeElement === transcript || transcript.contains(document.activeElement)) {
+              userScrolling = true
+              clearTimeout(scrollDetectionTimeout)
+              if (!audio.paused) {
+                scrollDetectionTimeout = setTimeout(() => {
+                  userScrolling = false
+                }, 2000)
+              }
+            }
+          }
+        })
+      
+        audio.addEventListener('volumechange', function () {
+          savePlayerSettings() // Save volume/mute state
+          updateMuteIndicator()
+        })
+      }
+      
+      function setupLazyTranscriptLoading() {
+        const mp3 = tracks[currentIndex]
+        let transcriptLoaded = false
+      
+        function loadTranscriptIfNeeded() {
+          if (!transcriptLoaded) {
+            transcriptLoaded = true
+            loadTranscript(mp3)
+          }
+        }
+      
+        // Load transcript on first interaction
+        audio.addEventListener('play', loadTranscriptIfNeeded, { once: true })
+        audio.addEventListener('seeking', loadTranscriptIfNeeded, { once: true })
+        audio.addEventListener('timeupdate', loadTranscriptIfNeeded, { once: true })
+      
+        // Also load if user clicks on transcript area
+        transcript.addEventListener('click', loadTranscriptIfNeeded, { once: true })
+      }
+      
+      // Enhanced transcript system with normalized line dataset and separate word timing
+      function parseVTTSimple(vttText) {
+        const lines = vttText.split(/\r?\n/)
+        const newWordCues = [] // This will be our flat list of WordCue objects
+        let i = 0
+      
+        // Skip header
+        while (i < lines.length && !lines[i].includes('-->')) {
+          i++
+        }
+      
+        // Parse all cues from VTT
+        while (i < lines.length) {
+          const line = lines[i].trim()
+      
+          if (line.includes('-->')) {
+            const [startStr, endStr] = line.split('-->').map((s) => s.trim())
+            const startTime = parseTimestamp(startStr)
+            const endTime = parseTimestamp(endStr)
+      
+            i++
+            let vttCueTextContent = ''
+            while (i < lines.length && lines[i].trim() !== '') {
+              if (vttCueTextContent) vttCueTextContent += ' '
+              vttCueTextContent += lines[i].trim()
+              i++
+            }
+      
+            if (vttCueTextContent) {
+              let wordText = ''
+              const uMatch = vttCueTextContent.match(/<u>([^<]*)<\/u>/)
+              if (uMatch && uMatch[1]) {
+                wordText = uMatch[1]
+              }
+      
+              const fullLineTextClean = vttCueTextContent
+                .replace(/<[^>]*>/g, '')
+                .replace(/\s+/g, ' ')
+                .trim()
+      
+              if (wordText && fullLineTextClean) {
+                newWordCues.push({
+                  startTime: startTime,
+                  endTime: endTime,
+                  wordText: wordText,
+                  fullLineTextClean: fullLineTextClean
+                })
+              }
+            }
+          }
+          i++
+        }
+      
+        const lineSet = new Set()
+        const tempNormalizedLines = []
+        const linesMap = new Map()
+        newWordCues.forEach((wordCue) => {
+          if (!linesMap.has(wordCue.fullLineTextClean)) {
+            linesMap.set(wordCue.fullLineTextClean, [])
+          }
+          linesMap.get(wordCue.fullLineTextClean).push(wordCue)
+        })
+      
+        linesMap.forEach((wordsInLine, lineText) => {
+          if (lineText && !lineSet.has(lineText)) {
+            lineSet.add(lineText)
+            let lineStartTime = Infinity
+            let lineEndTime = -Infinity
+            wordsInLine.forEach((wc) => {
+              lineStartTime = Math.min(lineStartTime, wc.startTime)
+              lineEndTime = Math.max(lineEndTime, wc.endTime)
+            })
+            tempNormalizedLines.push({
+              text: lineText,
+              startTime: lineStartTime,
+              endTime: lineEndTime,
+              wordIndices: wordsInLine.map((wc) => newWordCues.indexOf(wc))
+            })
+          }
+        })
+      
+        tempNormalizedLines.sort((a, b) => a.startTime - b.startTime)
+      
+        cues = newWordCues
+        normalizedLines = tempNormalizedLines
+        cueToLineMap = new Map()
+      
+        // console.log(`Parsed ${cues.length} word cues into ${normalizedLines.length} unique display lines`)
+        return cues
+      }
+      
+      // Find active cue and line based on current time
+      function findActiveIndices(currentTime) {
+        let activeWordIndex = -1
+        let activeLineIndex = -1
+        const internalLookAheadOffset = 0.0 // Changed from 0.02 to 0
+        const userTimingOffset = parseFloat(timingOffsetSlider.value) || 0 // Get user-configured offset
+        const effectiveTime = currentTime + internalLookAheadOffset + userTimingOffset
+      
+        // console.log(`[findActiveIndices] currentTime: ${currentTime.toFixed(3)}, userOffset: ${userTimingOffset.toFixed(3)}, effectiveTime: ${effectiveTime.toFixed(3)}`);
+      
+        if (!cues || cues.length === 0 || !normalizedLines || normalizedLines.length === 0) {
+          return { activeWordIndex: -1, activeLineIndex: -1 }
+        }
+      
+        // 1. Find the active word using effectiveTime
+        // Exact match: effectiveTime is within a word's start and end time
+        for (let i = 0; i < cues.length; i++) {
+          if (effectiveTime >= cues[i].startTime && effectiveTime < cues[i].endTime) {
+            activeWordIndex = i
+            break
+          }
+        }
+      
+        // Fallback: If no exact word match, find the last word that has started based on effectiveTime
+        if (activeWordIndex === -1) {
+          let lastStartedWord = -1
+          for (let i = 0; i < cues.length; i++) {
+            if (cues[i].startTime <= effectiveTime) {
+              lastStartedWord = i
+            } else {
+              break // Cues are sorted by startTime
+            }
+          }
+          activeWordIndex = lastStartedWord
+        }
+      
+        // 2. Determine the active line based on effectiveTime primarily, then active word
+        // Primary: Find line where effectiveTime is within line's start and end time
+        for (let i = 0; i < normalizedLines.length; i++) {
+          if (effectiveTime >= normalizedLines[i].startTime && effectiveTime <= normalizedLines[i].endTime) {
+            activeLineIndex = i
+            break
+          }
+        }
+      
+        // Fallback for activeLineIndex if not found by direct time match, but we have an active word
+        if (activeLineIndex === -1 && activeWordIndex !== -1 && cues[activeWordIndex]) {
+          const activeWordLineText = cues[activeWordIndex].fullLineTextClean
+          for (let i = 0; i < normalizedLines.length; i++) {
+            if (normalizedLines[i].text === activeWordLineText) {
+              // Ensure the word's effectiveTime is somewhat close or within this line (using 0.5s window for lines)
+              if (effectiveTime >= normalizedLines[i].startTime - 0.5 && effectiveTime <= normalizedLines[i].endTime + 0.5) {
+                activeLineIndex = i
+                break
+              }
+              if (activeLineIndex === -1) activeLineIndex = i // Default to first matching line for the word
+            }
+          }
+        }
+      
+        // If still no active line, but we have an active word, try to find its line directly using the word's original line text.
+        if (activeLineIndex === -1 && activeWordIndex !== -1 && cues[activeWordIndex]) {
+          const activeWordLineText = cues[activeWordIndex].fullLineTextClean
+          const potentialLineIndex = normalizedLines.findIndex((line) => line.text === activeWordLineText)
+          if (potentialLineIndex !== -1) {
+            activeLineIndex = potentialLineIndex
+          }
+        }
+      
+        // If effectiveTime is before the first line starts
+        if (activeLineIndex === -1 && normalizedLines.length > 0 && effectiveTime < normalizedLines[0].startTime) {
+          activeLineIndex = -1 // No line is truly active yet
+        }
+      
+        // If effectiveTime is after the last line ends
+        if (activeLineIndex === -1 && normalizedLines.length > 0 && currentTime > normalizedLines[normalizedLines.length - 1].endTime) {
+          // For time after last line, use actual currentTime to avoid offset making it stick to last line too long
+          activeLineIndex = normalizedLines.length - 1 // Highlight the last line
+        }
+      
+        return { activeWordIndex, activeLineIndex }
+      }
+      
+      // Main transcript update loop using requestAnimationFrame
+      function transcriptRenderLoop() {
+        if (!rafLoopRunning) return
+      
+        if (audio.currentTime !== lastAudioCurrentTime) {
+          updateTranscriptDisplay() // Uses live audio.currentTime
+          lastAudioCurrentTime = audio.currentTime
+        }
+        requestAnimationFrame(transcriptRenderLoop)
+      }
+      
+      function startTranscriptRenderLoop() {
+        if (!rafLoopRunning) {
+          rafLoopRunning = true
+          lastAudioCurrentTime = audio.currentTime // Initialize
+          requestAnimationFrame(transcriptRenderLoop)
+        }
+      }
+      
+      function stopTranscriptRenderLoop() {
+        rafLoopRunning = false
+      }
+      
+      // Enhanced transcript display using normalized lines
+      function updateTranscriptDisplay(forcedTime = null) {
+        const currentTime = forcedTime !== null ? forcedTime : audio.currentTime
+        // console.log(`[UTD Entry] Called. Audio currentTime: ${audio.currentTime.toFixed(3)}, Using currentTime: ${currentTime.toFixed(3)}`);
+      
+        if (!normalizedLines || normalizedLines.length === 0 || !cues || cues.length === 0) {
+          // console.log('[UTD] No normalizedLines or cues, returning.');
+          return
+        }
+      
+        const isWordLevel = wordLevelToggle.checked
+        const lookback = parseInt(lookbackSlider.value)
+        const lookahead = parseInt(lookaheadSlider.value)
+      
+        // Find the line that *should* be current based on simpler rule for holding highlight
+        let currentDisplayLineIndex = -1
+        for (let i = 0; i < normalizedLines.length; i++) {
+          const lineStartTime = normalizedLines[i].startTime
+          const nextLineStartTime = i + 1 < normalizedLines.length ? normalizedLines[i + 1].startTime : Infinity
+      
+          if (currentTime >= lineStartTime && currentTime < nextLineStartTime) {
+            currentDisplayLineIndex = i
+            break
+          }
+        }
+        // If currentTime is past the start of the last line, it should be current
+        if (currentDisplayLineIndex === -1 && normalizedLines.length > 0 && currentTime >= normalizedLines[normalizedLines.length - 1].startTime) {
+          currentDisplayLineIndex = normalizedLines.length - 1
+        }
+      
+        const { activeWordIndex, activeLineIndex: focusedLineForWord } = findActiveIndices(currentTime)
+        // console.log(`[UTD findActiveIndices Result] activeWordIndex: ${activeWordIndex}, focusedLineForWord: ${focusedLineForWord}`); // Removed
+        // focusedLineForWord from findActiveIndices is for word highlighting precision within the currentDisplayLineIndex
+      
+        let windowStart, windowEnd
+        const anchorIndex = currentDisplayLineIndex !== -1 ? currentDisplayLineIndex : focusedLineForWord !== -1 ? focusedLineForWord : 0
+        // console.log(`[UTD Calculated currentDisplayLineIndex]: ${currentDisplayLineIndex}, anchorIndex: ${anchorIndex}`); // Removed
+      
+        if (anchorIndex >= 0 && anchorIndex < normalizedLines.length) {
+          windowStart = Math.max(0, anchorIndex - lookback)
+          windowEnd = Math.min(normalizedLines.length - 1, anchorIndex + lookahead)
+        } else {
+          windowStart = 0
+          windowEnd = Math.min(normalizedLines.length - 1, lookback + lookahead)
+          if (normalizedLines.length === 0) windowEnd = -1 // No lines to display
+        }
+        // console.log(`[UTD Window] start: ${windowStart}, end: ${windowEnd}`); // Removed
+      
+        transcript.innerHTML = ''
+        transcript.className = '' // Clear all classes first
+        transcript.classList.add(highlightStyleSelect.value) // Add selected highlight style class
+      
+        for (let i = windowStart; i <= windowEnd; i++) {
+          if (i < 0 || i >= normalizedLines.length) continue
+      
+          const line = normalizedLines[i]
+          const div = document.createElement('div')
+          div.className = 'cue'
+      
+          // Apply .current class based on our new currentDisplayLineIndex
+          if (i === currentDisplayLineIndex) {
+            div.classList.add('current')
+          }
+      
+          let displayText = ''
+          // Word highlighting should happen if it's the currentDisplayLineIndex and word level is on.
+          if (isWordLevel && i === currentDisplayLineIndex && activeWordIndex !== -1 && cues[activeWordIndex]) {
+            // Ensure the activeWordIndex actually belongs to the currentDisplayLineIndex text
+            if (cues[activeWordIndex].fullLineTextClean === line.text) {
+              const wordsInThisDisplayLine = cues.filter((wordCue) => wordCue.fullLineTextClean === line.text)
+              wordsInThisDisplayLine.sort((a, b) => a.startTime - b.startTime)
+      
+              wordsInThisDisplayLine.forEach((word) => {
+                const isCurrentWord = currentTime >= word.startTime && currentTime < word.endTime
+                if (isCurrentWord) {
+                  displayText += `<u>${word.wordText}</u>`
+                } else {
+                  displayText += word.wordText
+                }
+                displayText += ' '
+              })
+              displayText = displayText.trim()
+            } else {
+              // Fallback if activeWordIndex's line doesn't match currentDisplayLineIndex's text (should be rare)
+              displayText = line.text
+            }
+          } else {
+            displayText = line.text
+          }
+      
+          div.innerHTML = displayText
+          div.addEventListener('click', () => {
+            stopTranscriptRenderLoop() // Stop the loop
+            audio.currentTime = line.startTime
+            // Add a one-time seeked listener to update transcript and restart loop
+            audio.addEventListener(
+              'seeked',
+              function onSeekedAfterLineClick() {
+                // console.log(`[LineClick Seeked] Target: ${line.startTime.toFixed(3)}, Actual: ${audio.currentTime.toFixed(3)}`);
+                updateTranscriptDisplay() // Update with stable currentTime
+                lastAudioCurrentTime = audio.currentTime // Sync lastAudioCurrentTime
+                startTranscriptRenderLoop() // Restart the loop
+                audio.play() // Ensure playback starts/resumes
+              },
+              { once: true }
+            )
+          })
+          transcript.appendChild(div)
+        }
+      
+        // Force DOM reflow/repaint
+        transcript.style.display = 'none'
+        transcript.offsetHeight // Accessing offsetHeight can trigger a reflow
+        transcript.style.display = ''
+      
+        const currentLineEl = transcript.querySelector('.cue.current')
+        if (currentLineEl && !userScrolling && !settingsInteractionInProgress) {
+          // Check new flag
+          const now = Date.now()
+          // Check if the visually current line has actually changed
+          if (currentDisplayLineIndex !== lastVisuallyCurrentLineIndex) {
+            // Debounce smooth scroll to once per ~150ms for inter-line transitions
+            if (now - lastSmoothScrollTime > 150) {
+              currentLineEl.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+              lastSmoothScrollTime = now
+            }
+            lastVisuallyCurrentLineIndex = currentDisplayLineIndex // Update tracker
+          } else if (now - lastAutoScrollTime > 2000 && !audio.paused) {
+            // Periodic recenter only if playing
+            // Periodic recenter (less frequent, auto behavior)
+            currentLineEl.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
+          }
+          if (!audio.paused) {
+            // Only update lastAutoScrollTime if playing, to allow scroll on pause
+            lastAutoScrollTime = now // Update for both cases to manage periodic recenter
+          }
+        }
+      }
+      
+      function parseTimestamp(timeStr) {
+        const parts = timeStr.split(':')
+        let seconds = 0
+      
+        if (parts.length === 2) {
+          seconds = parseFloat(parts[0]) * 60 + parseFloat(parts[1])
+        } else if (parts.length === 3) {
+          seconds = parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2])
+        }
+      
+        return seconds
+      }
+      
+      function getFileUrl(filename) {
+        return '/file/' + encodeURIComponent(bookName) + '/' + encodeURIComponent(filename)
+      }
+      
+      function loadTrack(index) {
+        currentIndex = index
+        transcriptDataLoadedForCurrentTrack = false // Reset flag for new track
+        stopTranscriptRenderLoop() // Stop loop for old track
+        // if (timeUpdateListener) { // This was for the old RAF-alternative
+        //   audio.removeEventListener('timeupdate', timeUpdateListener)
+        //   timeUpdateListener = null
+        // }
+        // Remove generic timeupdate listener from old audio object if it exists, before changing src
+        audio.removeEventListener('timeupdate', handleGenericTimeUpdate)
+      
+        const mp3 = tracks[currentIndex]
+        audio.src = getFileUrl(mp3)
+        trackInfo.textContent = currentIndex + 1 + '/' + tracks.length + ': ' + mp3
+      
+        // Setup lazy loading for new track
+        setupLazyTranscriptLoading()
+      
+        // Update URL to reflect current track
+        const currentUrl = new URL(window.location)
+        currentUrl.searchParams.set('file', mp3)
+        window.history.replaceState({}, '', currentUrl)
+      
+        // Save current chapter progress
+        saveCurrentChapterProgress(bookName, mp3)
+      
+        // Load saved playback position for this track (async)
+        loadPlaybackPosition().catch((error) => {
+          // console.warn('Failed to load playback position:', error)
+        })
+      }
+      
+      function prevChapter() {
+        if (currentIndex > 0) loadTrack(currentIndex - 1)
+      }
+      
+      function nextChapter() {
+        if (currentIndex < tracks.length - 1) {
+          loadTrack(currentIndex + 1)
+          // Auto-start playback if autoplay is enabled
+          if (autoplayToggle.checked) {
+            audio.addEventListener(
+              'loadeddata',
+              function () {
+                audio.play()
+              },
+              { once: true }
+            )
+          }
+        }
+      }
+      
+      async function loadTranscript(mp3) {
+        try {
+          document.getElementById('status-main-text').textContent = 'Loading transcript...'
+          document.getElementById('transcript-stats-container').style.display = 'none'
+          transcript.innerHTML = ''
+          transcriptDataLoadedForCurrentTrack = false
+      
+          if (timeUpdateListener) {
+            audio.removeEventListener('timeupdate', timeUpdateListener)
+            timeUpdateListener = null
+          }
+      
+          const vttUrl = getFileUrl(mp3.replace(/\.mp3$/, '.vtt'))
+      
+          const response = await fetch(vttUrl)
+          if (!response.ok) {
+            throw new Error('Failed to fetch VTT: ' + response.status + ' ' + response.statusText)
+          }
+      
+          const vttText = await response.text()
+          parseVTTSimple(vttText)
+      
+          const hasWordHighlighting = cues.some((cue) => cue.wordText && cue.wordText !== cue.fullLineTextClean) // More robust check
+          const wordHighlightStatus = document.getElementById('word-highlight-status')
+          if (hasWordHighlighting) {
+            wordHighlightStatus.textContent = '(available)'
+            wordHighlightStatus.style.color = 'var(--success-color)'
+          } else {
+            wordHighlightStatus.textContent = '(estimated timing)'
+            wordHighlightStatus.style.color = 'var(--warning-color)'
+          }
+      
+          if (normalizedLines.length === 0) {
+            document.getElementById('status-main-text').textContent = 'No transcript content found'
+            document.getElementById('transcript-stats-container').style.display = 'none'
+            // transcriptDataLoadedForCurrentTrack remains false
+            return // Exit if no lines, flag remains false.
+          }
+      
+          const statsTextContent = `(${normalizedLines.length} unique lines, ${cues.length} word cues)`
+          document.getElementById('status-main-text').textContent = 'Transcript loaded'
+          document.getElementById('transcript-stats-text').textContent = statsTextContent
+          document.getElementById('transcript-stats-container').style.display = 'inline-block' // Use inline-block for proper layout with icon
+          tooltip.style.display = 'none' // Ensure tooltip is hidden initially
+      
+          // DO NOT call updateTranscriptDisplay() here directly anymore for the initial load.
+          // The 'seeked' event in loadPlaybackPosition will handle the first update for resumes.
+          // For tracks starting fresh, the timeupdate listener will pick it up.
+          transcriptDataLoadedForCurrentTrack = true
+          // console.log('[LoadTranscript] Transcript loaded and parsed. transcriptDataLoadedForCurrentTrack = true.')
+      
+          // Instead of direct timeupdate listener, start the render loop
+          // audio.addEventListener('timeupdate', timeUpdateListener) // OLD
+          startTranscriptRenderLoop() // NEW
+          // The timeupdate listener might still be useful for less frequent tasks like saving playback position
+          if (timeUpdateListener) {
+            // Clear any old specific timeupdate for transcript display
+            audio.removeEventListener('timeupdate', timeUpdateListener)
+            timeUpdateListener = null
+          }
+          // Add a general timeupdate for other tasks if needed, but not for transcript display itself
+          // For example, to save playback position periodically (less frequent than RAF)
+          audio.addEventListener('timeupdate', handleGenericTimeUpdate)
+        } catch (error) {
+          // console.error('Error loading VTT in loadTranscript:', error)
+          document.getElementById('status-main-text').textContent = 'Error loading transcript: ' + error.message
+          document.getElementById('transcript-stats-container').style.display = 'none'
+          transcript.innerHTML = '<div style="color:red">Error: ' + error.message + '</div>'
+          transcriptDataLoadedForCurrentTrack = false // Ensure flag is false on error
+          throw error // Re-throw to allow await in loadPlaybackPosition to catch it
+        }
+      }
+      
+      // Listener for less frequent time updates (e.g., saving position)
+      function handleGenericTimeUpdate() {
+        if (Math.floor(audio.currentTime) % 5 === 0 && Math.floor(audio.currentTime) !== Math.floor(lastAudioCurrentTimeForSave)) {
+          savePlaybackPosition()
+          lastAudioCurrentTimeForSave = audio.currentTime
+        }
+      }
+      let lastAudioCurrentTimeForSave = 0 // Companion for handleGenericTimeUpdate
+      
+      function savePlaybackPosition() {
+        if (audio.src && tracks[currentIndex]) {
+          const currentTime = audio.currentTime
+          if (currentTime > 0) {
+            playbackPersistence.savePosition(bookName, tracks[currentIndex], currentTime)
+          }
+        }
+        updateTranscriptDisplay() // Refresh transcript
+      }
+      
+      function setDefaultTimingOffset() {
+        timingOffsetSlider.value = 0
+        timingOffsetValue.textContent = '0ms'
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateTranscriptDisplay() // Refresh transcript
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      }
+      
+      function updateMuteIndicator() {
+        if (muteIndicator) {
+          muteIndicator.style.display = audio.muted ? 'inline' : 'none'
+        }
+      }
+      
+      function setDefaultCurrentLineBgOpacity() {
+        currentLineBgOpacitySlider.value = 1
+        currentLineBgOpacityValue.textContent = '1.00'
+        updateCurrentLineStyles()
+        savePlayerSettings()
+        settingsInteractionInProgress = true
+        updateTranscriptDisplay()
+        setTimeout(() => {
+          settingsInteractionInProgress = false
+        }, 0)
+      }
+    </script>
+  </body>
+</html>

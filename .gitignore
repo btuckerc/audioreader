@@ -1,0 +1,13 @@
+# Python
+*.pyc
+__pycache__/
+venv/
+whisper-env/
+
+# OS-specific
+.DS_Store
+
+# Application-specific
+books/
+audiobooks_app.log
+speed_ratios.json

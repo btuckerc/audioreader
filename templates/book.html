@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ book }} - Audiobooks</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/book.css') }}" />
+    <link rel="prefetch" href="{{ url_for('static', filename='css/player.css') }}" as="style" />
+    <link rel="prefetch" href="{{ url_for('player', book=book) }}" as="document" />
+  </head>
+  <body>
+    <div class="mode-controls">
+      <button onclick="toggleDarkMode()">Dark</button>
+    </div>
+
+    <div class="container" data-book="{{ book }}">
+      <div>
+        <a href="/" class="back-link">← Back to home</a>
+      </div>
+
+      <h1>{{ book }}</h1>
+
+      <div class="transcription-options">
+        <div class="transcription-header" onclick="toggleTranscriptionSettings()">
+          <h3>Transcription Settings</h3>
+          <span class="fold-indicator">▼</span>
+        </div>
+        <div class="transcription-content" id="transcriptionContent">
+          <div class="option-group">
+            <label>
+              <input type="checkbox" id="wordTimestamps" checked />Word-level timestamps
+              <span class="capability-status capability-available" id="wordTimestampsStatus">AVAILABLE</span>
+            </label>
+          </div>
+          <div class="option-group">
+            <label>
+              <input type="checkbox" id="highlighting" checked />Word highlighting (VTT)
+              <span class="capability-status capability-available" id="highlightingStatus">AVAILABLE</span>
+            </label>
+          </div>
+          <div class="option-group">
+            <label>
+              <input type="checkbox" id="parallelProcessing" />Parallel processing
+              <span class="capability-status capability-available">EXPERIMENTAL</span>
+            </label>
+            <label>Workers:<input type="number" id="maxWorkers" value="2" min="1" max="4" /></label>
+          </div>
+          <div class="option-group">
+            <label><input type="checkbox" id="showDebugLog" checked />Show debug log during transcription</label>
+          </div>
+          <div class="option-group">
+            <button onclick="runSpeedTest()" id="speedTestBtn" class="speed-test-button">Test Speed</button>
+            <span id="speedTestResult"></span>
+          </div>
+          <div class="option-group" id="timeEstimatesToggle" style="display:none;">
+            <label><input type="checkbox" id="showTimeEstimates" checked />Show time estimates on Generate buttons</label>
+          </div>
+          <div id="estimatesSection" style="display:none; margin-top: 15px;">
+            <div class="estimates-header" onclick="toggleEstimates()">
+              <h4>Estimated Transcription Times</h4>
+              <span class="fold-indicator" id="estimatesIndicator">▼</span>
+            </div>
+            <div id="estimatesContent" class="estimates-content"></div>
+            <div id="totalTimeInfo" class="total-time-info"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="main-controls">
+        <div class="main-controls-left">
+          <button onclick="location.href='{{ url_for('player', book=book) }}'">Player</button>
+        </div>
+        <div class="main-controls-right">
+          <span id="whisperStatus" class="status-indicator">Whisper available</span>
+          <button onclick="genAll()" id="generateAllBtn">
+            <span id="generateAllTime" class="button-time-indicator"></span>
+            Generate ALL
+          </button>
+        </div>
+      </div>
+
+      <ul id="chapterList">
+        {# Initial rendering will be minimal, JS will populate details #}
+        {% for f in mp3s %}
+          <li data-filename="{{ f|e }}">
+            <div class="file-info">
+              <span>{{ f }}</span> {# Just the filename initially #}
+            </div>
+            <div class="file-actions">
+              {# Placeholder, JS will fill this #}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+
+      <p>
+        <a href="/" class="back-link">← Back to home</a>
+      </p>
+    </div>
+
+    <div id="log">
+      <div class="controls">
+        <button onclick="saveLog()">Save Log</button>
+        <button onclick="refreshChapterList()">Reload List</button>
+        <button onclick="hideLog()">Close</button>
+      </div>
+      <pre></pre>
+    </div>
+
+    <script>
+      const log = document.getElementById('log')
+      const pre = log.querySelector('pre')
+      let whisperCapabilities = null
+      let currentEstimates = {}
+      let activeGenerations = new Set() // Keep track of active generation jobs by filename
+      const bookName = document.querySelector('.container').dataset.book // Define bookName globally for this script
+      
+      function toggleTranscriptionSettings() {
+        const content = document.getElementById('transcriptionContent')
+        const indicator = document.querySelector('.fold-indicator')
+      
+        content.classList.toggle('expanded')
+        indicator.classList.toggle('expanded')
+      
+        // Save expansion state
+        localStorage.setItem('transcriptionSettingsExpanded', content.classList.contains('expanded'))
+      }
+      
+      function saveTranscriptionSettings() {
+        const settings = {
+          word_timestamps: document.getElementById('wordTimestamps').checked,
+          highlighting: document.getElementById('highlighting').checked,
+          parallel_processing: document.getElementById('parallelProcessing').checked,
+          max_workers: parseInt(document.getElementById('maxWorkers').value) || 2,
+          show_debug_log: document.getElementById('showDebugLog').checked,
+          show_time_estimates: document.getElementById('showTimeEstimates').checked
+        }
+        localStorage.setItem('transcriptionSettings', JSON.stringify(settings))
+      }
+      
+      function loadTranscriptionSettings() {
+        const saved = localStorage.getItem('transcriptionSettings')
+        if (saved) {
+          try {
+            const settings = JSON.parse(saved)
+            document.getElementById('wordTimestamps').checked = settings.word_timestamps !== false
+            document.getElementById('highlighting').checked = settings.highlighting !== false
+            document.getElementById('parallelProcessing').checked = settings.parallel_processing || false
+            document.getElementById('maxWorkers').value = settings.max_workers || 2
+            document.getElementById('showDebugLog').checked = settings.show_debug_log !== false
+            document.getElementById('showTimeEstimates').checked = settings.show_time_estimates !== false
+          } catch (e) {
+            console.error('Error loading transcription settings:', e)
+          }
+        }
+      
+        // Restore expansion state
+        const expanded = localStorage.getItem('transcriptionSettingsExpanded') === 'true'
+        if (expanded) {
+          const content = document.getElementById('transcriptionContent')
+          const indicator = document.querySelector('.fold-indicator')
+          content.classList.add('expanded')
+          indicator.classList.add('expanded')
+        }
+      }
+      
+      // Save settings when they change
+      function setupSettingsListeners() {
+        document.getElementById('wordTimestamps').addEventListener('change', saveTranscriptionSettings)
+        document.getElementById('highlighting').addEventListener('change', saveTranscriptionSettings)
+        document.getElementById('parallelProcessing').addEventListener('change', saveTranscriptionSettings)
+        document.getElementById('maxWorkers').addEventListener('change', saveTranscriptionSettings)
+        document.getElementById('showDebugLog').addEventListener('change', saveTranscriptionSettings)
+        document.getElementById('showTimeEstimates').addEventListener('change', function () {
+          saveTranscriptionSettings()
+          updateButtonTimeIndicators() // Explicitly call this to update UI immediately
+        })
+      }
+      
+      // Load Whisper capabilities - split for immediate cache check and deferred fresh fetch
+      function tryLoadCachedWhisperCapabilities() {
+        const sessionKey = 'cachedWhisperCapabilities'
+        try {
+          const cached = sessionStorage.getItem(sessionKey)
+          if (cached) {
+            whisperCapabilities = JSON.parse(cached)
+            updateCapabilityUI() // Update UI with cached data immediately
+            // console.log('Loaded whisper capabilities from cache.');
+          }
+        } catch (e) {
+          console.warn('Failed to load cached whisper capabilities', e)
+          whisperCapabilities = null // Ensure it's null if cache is bad
+        }
+      }
+      
+      async function fetchFreshWhisperCapabilities() {
+        const sessionKey = 'cachedWhisperCapabilities'
+        try {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 3000)
+      
+          const response = await fetch('/api/whisper/capabilities', {
+            signal: controller.signal
+          })
+          clearTimeout(timeoutId)
+      
+          if (response.ok) {
+            const freshCapabilities = await response.json()
+            whisperCapabilities = freshCapabilities
+            updateCapabilityUI() // Update UI with fresh data
+            // console.log('Fetched fresh whisper capabilities.');
+            try {
+              sessionStorage.setItem(sessionKey, JSON.stringify(freshCapabilities))
+            } catch (e) {
+              console.warn('Failed to save whisper capabilities to sessionStorage', e)
+            }
+          } else if (!whisperCapabilities) {
+            setDefaultCapabilities()
+            // console.log('Fetch failed, no cache, using default capabilities.');
+          }
+        } catch (error) {
+          if (!whisperCapabilities) {
+            setDefaultCapabilities()
+            // console.log('Fetch error, no cache, using default capabilities.');
+          }
+          // console.warn('Failed to fetch fresh whisper capabilities:', error);
+        }
+      }
+      
+      function setDefaultCapabilities() {
+        whisperCapabilities = {
+          installed: true, // Assume true if API fails, can be updated later
+          word_timestamps_available: true,
+          highlight_words_available: true
+        }
+        updateCapabilityUI()
+      }
+      
+      function updateCapabilityUI() {
+        const wordTimestampsStatus = document.getElementById('wordTimestampsStatus')
+        const highlightingStatus = document.getElementById('highlightingStatus')
+        const whisperStatus = document.getElementById('whisperStatus')
+        const wordTimestampsCheckbox = document.getElementById('wordTimestamps')
+        const highlightingCheckbox = document.getElementById('highlighting')
+      
+        if (!whisperCapabilities) return
+      
+        // Update status indicators
+        if (whisperCapabilities.installed) {
+          whisperStatus.textContent = 'Whisper available'
+          whisperStatus.className = 'status-indicator capability-available'
+        } else {
+          whisperStatus.textContent = 'Whisper not found'
+          whisperStatus.className = 'status-indicator capability-unavailable'
+        }
+      
+        if (whisperCapabilities.word_timestamps_available) {
+          wordTimestampsStatus.textContent = 'AVAILABLE'
+          wordTimestampsStatus.className = 'capability-status capability-available'
+        } else {
+          wordTimestampsStatus.textContent = 'NOT AVAILABLE'
+          wordTimestampsStatus.className = 'capability-status capability-unavailable'
+          wordTimestampsCheckbox.disabled = true
+          wordTimestampsCheckbox.checked = false
+        }
+      
+        if (whisperCapabilities.highlight_words_available) {
+          highlightingStatus.textContent = 'AVAILABLE'
+          highlightingStatus.className = 'capability-status capability-available'
+        } else {
+          highlightingStatus.textContent = 'NOT AVAILABLE'
+          highlightingStatus.className = 'capability-status capability-unavailable'
+          highlightingCheckbox.disabled = true
+          highlightingCheckbox.checked = false
+        }
+      
+        // Disable highlighting if word timestamps aren't available
+        function updateHighlightingState() {
+          const wordTimestampsEnabled = wordTimestampsCheckbox.checked && !wordTimestampsCheckbox.disabled
+          if (!wordTimestampsEnabled) {
+            highlightingCheckbox.disabled = true
+            highlightingCheckbox.checked = false
+          } else if (whisperCapabilities.highlight_words_available) {
+            highlightingCheckbox.disabled = false
+          }
+        }
+      
+        wordTimestampsCheckbox.addEventListener('change', updateHighlightingState)
+        updateHighlightingState()
+      }
+      
+      function getTranscriptionOptions() {
+        const highlightState = document.getElementById('highlighting').checked
+        return {
+          word_timestamps: document.getElementById('wordTimestamps').checked,
+          highlighting: highlightState, // For speed test key matching
+          highlight_words: highlightState, // For actual transcription jobs
+          parallel_processing: document.getElementById('parallelProcessing').checked,
+          max_workers: parseInt(document.getElementById('maxWorkers').value) || 2
+        }
+      }
+      
+      function toggleEstimates() {
+        const content = document.getElementById('estimatesContent')
+        const indicator = document.getElementById('estimatesIndicator')
+      
+        content.classList.toggle('expanded')
+        indicator.classList.toggle('expanded')
+      }
+      
+      // Helper function for parallel time calculation
+      function calculateParallelTotalTime(pendingFileEstimatesSeconds, numWorkersInput) {
+        const numWorkers = Math.max(1, parseInt(numWorkersInput) || 1)
+      
+        if (!pendingFileEstimatesSeconds || pendingFileEstimatesSeconds.length === 0) {
+          return 0
+        }
+      
+        if (numWorkers === 1) {
+          return pendingFileEstimatesSeconds.reduce((sum, t) => sum + t, 0)
+        }
+      
+        const sortedTasks = [...pendingFileEstimatesSeconds].sort((a, b) => b - a)
+        const workerFinishTimes = new Array(numWorkers).fill(0)
+      
+        for (const taskTime of sortedTasks) {
+          let earliestWorkerIndex = 0
+          for (let i = 1; i < numWorkers; i++) {
+            if (workerFinishTimes[i] < workerFinishTimes[earliestWorkerIndex]) {
+              earliestWorkerIndex = i
+            }
+          }
+          workerFinishTimes[earliestWorkerIndex] += taskTime
+        }
+        return Math.max(...workerFinishTimes)
+      }
+      
+      function showEstimates(estimates) {
+        const estimatesContent = document.getElementById('estimatesContent')
+        const totalTimeInfo = document.getElementById('totalTimeInfo')
+      
+        estimatesContent.innerHTML = '' // Clear previous estimates
+      
+        if (estimates && typeof estimates === 'object' && Object.keys(estimates).length > 0) {
+          for (const [filename, info] of Object.entries(estimates)) {
+            if (typeof info.estimated_time !== 'number') continue
+      
+            const item = document.createElement('div')
+            item.className = 'estimate-item'
+      
+            const nameSpan = document.createElement('span')
+            nameSpan.className = 'estimate-filename'
+            nameSpan.textContent = filename
+      
+            const timeSpan = document.createElement('span')
+            timeSpan.className = 'estimate-time'
+      
+            const minutes = Math.ceil(info.estimated_time / 60)
+            const hours = Math.floor(minutes / 60)
+            const remainingMinutes = minutes % 60
+      
+            if (hours > 0) {
+              timeSpan.textContent = `~${hours}h ${remainingMinutes}m`
+            } else {
+              timeSpan.textContent = `~${minutes}m`
+            }
+      
+            item.appendChild(nameSpan)
+            item.appendChild(timeSpan)
+            estimatesContent.appendChild(item)
+          }
+        } else {
+          // Optionally, display a message if there are no estimates
+          // estimatesContent.textContent = 'No estimates available.';
+        }
+      
+        // Show total time, considering parallel processing
+        let allFileTimesSeconds = []
+        if (estimates && typeof estimates === 'object') {
+          allFileTimesSeconds = Object.values(estimates)
+            .filter((info) => typeof info.estimated_time === 'number')
+            .map((info) => info.estimated_time)
+        }
+      
+        let totalEffectiveTimeSeconds = 0
+        if (allFileTimesSeconds.length > 0) {
+          const parallelCheckbox = document.getElementById('parallelProcessing')
+          const workersInput = document.getElementById('maxWorkers')
+      
+          // Ensure elements exist before accessing properties
+          const isParallel = parallelCheckbox ? parallelCheckbox.checked : false
+          const numWorkers = workersInput ? parseInt(workersInput.value) || 1 : 1
+      
+          if (isParallel && numWorkers > 1) {
+            totalEffectiveTimeSeconds = calculateParallelTotalTime(allFileTimesSeconds, numWorkers)
+          } else {
+            totalEffectiveTimeSeconds = allFileTimesSeconds.reduce((sum, t) => sum + t, 0)
+          }
+        }
+      
+        const totalMinutes = Math.ceil(totalEffectiveTimeSeconds / 60)
+        const totalHours = Math.floor(totalMinutes / 60)
+        const totalRemainingMinutes = totalMinutes % 60
+      
+        let totalText = 'Full Book Estimate (at current speed): '
+        if (totalHours > 0) {
+          totalText += `~${totalHours}h ${totalRemainingMinutes}m`
+        } else if (totalMinutes > 0) {
+          totalText += `~${totalMinutes}m`
+        } else {
+          if (allFileTimesSeconds.length > 0) {
+            totalText += '~<1m'
+          } else {
+            totalText += 'N/A'
+          }
+        }
+        totalTimeInfo.textContent = totalText
+      }
+      
+      function updateButtonTimeIndicators() {
+        const showTimeEstimates = document.getElementById('showTimeEstimates').checked
+      
+        if (!currentEstimates || !showTimeEstimates) {
+          document.querySelectorAll('.button-time-indicator').forEach((indicator) => {
+            indicator.textContent = ''
+          })
+          return
+        }
+      
+        document.querySelectorAll('button[data-file] .button-time-indicator').forEach((indicator) => {
+          const button = indicator.closest('button')
+          const filename = button.dataset.file
+          if (currentEstimates[filename] && typeof currentEstimates[filename].estimated_time === 'number') {
+            const minutes = Math.ceil(currentEstimates[filename].estimated_time / 60)
+            const hours = Math.floor(minutes / 60)
+            const remainingMinutes = minutes % 60
+            if (hours > 0) {
+              indicator.textContent = `(~${hours}h ${remainingMinutes}m)`
+            } else {
+              indicator.textContent = `(~${minutes}m)`
+            }
+          } else {
+            indicator.textContent = ''
+          }
+        })
+      
+        const generateAllTimeIndicator = document.getElementById('generateAllTime')
+        if (generateAllTimeIndicator) {
+          let pendingFileTimesSeconds = []
+          document.querySelectorAll('li').forEach((li) => {
+            const generateButton = li.querySelector('button[data-file]')
+            if (generateButton) {
+              const filename = generateButton.dataset.file
+              if (currentEstimates[filename] && typeof currentEstimates[filename].estimated_time === 'number') {
+                pendingFileTimesSeconds.push(currentEstimates[filename].estimated_time)
+              }
+            }
+          })
+      
+          let totalEffectiveTimeSecondsForPending = 0
+          if (pendingFileTimesSeconds.length > 0) {
+            const parallelCheckbox = document.getElementById('parallelProcessing')
+            const workersInput = document.getElementById('maxWorkers')
+      
+            const isParallel = parallelCheckbox ? parallelCheckbox.checked : false
+            const numWorkers = workersInput ? parseInt(workersInput.value) || 1 : 1
+      
+            if (isParallel && numWorkers > 1) {
+              totalEffectiveTimeSecondsForPending = calculateParallelTotalTime(pendingFileTimesSeconds, numWorkers)
+            } else {
+              totalEffectiveTimeSecondsForPending = pendingFileTimesSeconds.reduce((sum, t) => sum + t, 0)
+            }
+          }
+      
+          if (totalEffectiveTimeSecondsForPending > 0) {
+            const totalMinutes = Math.ceil(totalEffectiveTimeSecondsForPending / 60)
+            const totalHours = Math.floor(totalMinutes / 60)
+            const remainingMinutes = totalMinutes % 60
+      
+            if (totalHours > 0) {
+              generateAllTimeIndicator.textContent = `(~${totalHours}h ${remainingMinutes}m)`
+            } else {
+              generateAllTimeIndicator.textContent = `(~${totalMinutes}m)`
+            }
+          } else {
+            generateAllTimeIndicator.textContent = ''
+          }
+        }
+      }
+      
+      async function runSpeedTest() {
+        const button = document.getElementById('speedTestBtn')
+        const resultDisplay = document.getElementById('speedTestResult')
+        const estimatesSection = document.getElementById('estimatesSection')
+      
+        button.disabled = true
+        button.textContent = 'Testing...'
+        resultDisplay.textContent = ''
+        resultDisplay.className = '' // Clear previous status class
+        estimatesSection.style.display = 'none'
+        currentEstimates = {} // Clear current estimates before test
+      
+        try {
+          const currentUiSettings = getTranscriptionOptions() // word_timestamps, highlighting, parallel, max_workers
+      
+          // Fetch file info for the current book to send to the backend for on-the-fly estimate calculation
+          resultDisplay.textContent = 'Loading file information for test...'
+          const fileInfoResponse = await fetch(`/api/book/${bookName}/file-info`)
+          let bookFileInfoData = {}
+          if (fileInfoResponse.ok) {
+            bookFileInfoData = await fileInfoResponse.json()
+          } else {
+            throw new Error('Failed to load file information for speed test.')
+          }
+          if (Object.keys(bookFileInfoData).length === 0) {
+            throw new Error('No audio files found in this book to base test on or estimate for.')
+          }
+      
+          resultDisplay.textContent = 'Running speed test...'
+          const response = await fetch('/api/whisper/speed-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              book: bookName, // Still needed to choose a source audio file for the test clip
+              settings: {
+                // Pass relevant settings that define the test configuration
+                word_timestamps: currentUiSettings.word_timestamps,
+                highlighting: currentUiSettings.highlighting
+                // model is implicit from app.py's global MODEL for the test run
+              },
+              file_info: bookFileInfoData // For backend to calculate current book estimates
+            })
+          })
+      
+          const data = await response.json()
+      
+          if (data.success && data.speed_ratio > 0) {
+            const speedRatio = parseFloat(data.speed_ratio).toFixed(1)
+            const modelTested = data.model_tested || 'unknown_model'
+            // const settingsTestedInfo = data.settings_tested_key_info || {}; // Can use this for more detailed display if needed
+      
+            resultDisplay.textContent = `Speed (${modelTested}): ${speedRatio}x realtime (New test)`
+            resultDisplay.className = 'speed-success'
+      
+            if (data.estimates && Object.keys(data.estimates).length > 0) {
+              currentEstimates = data.estimates // These are fresh for the current book
+              showEstimates(currentEstimates)
+              updateButtonTimeIndicators()
+              estimatesSection.style.display = 'block'
+              document.getElementById('timeEstimatesToggle').style.display = 'block'
+            } else {
+              resultDisplay.textContent += ' - Estimates calculation failed for current book.'
+              showEstimates({})
+              updateButtonTimeIndicators() // Clear displays
+            }
+          } else {
+            resultDisplay.textContent = `Error: ${data.error || 'Speed test failed or speed was zero.'}`
+            resultDisplay.className = 'speed-error'
+            showEstimates({})
+            updateButtonTimeIndicators() // Clear displays
+          }
+        } catch (error) {
+          console.error('Speed Test Error:', error)
+          resultDisplay.textContent = `Error: ${error.message}`
+          resultDisplay.className = 'speed-error'
+          showEstimates({})
+          updateButtonTimeIndicators() // Clear displays
+        } finally {
+          button.disabled = false
+          button.textContent = 'Test Speed'
+        }
+      }
+      
+      // Load saved speed ratio on page load - split for immediate cache and deferred fresh fetch
+      function tryLoadCachedSpeedResults() {
+        const speedTestResultDisplay = document.getElementById('speedTestResult')
+        const estimatesSection = document.getElementById('estimatesSection')
+        const timeEstimatesToggle = document.getElementById('timeEstimatesToggle')
+        const bookNameElement = document.querySelector('.container')
+        const bookName = bookNameElement ? bookNameElement.dataset.book : ''
+        const currentModelName = '{{ current_model_name }}' // Simplified initialization
+        const cacheKey = `cachedSpeedResults_${bookName}_${currentModelName}`
+      
+        try {
+          const cachedData = sessionStorage.getItem(cacheKey)
+          if (cachedData) {
+            const parsedCache = JSON.parse(cachedData)
+            if (parsedCache.estimates && Object.keys(parsedCache.estimates).length > 0) {
+              currentEstimates = parsedCache.estimates
+              if (speedTestResultDisplay) {
+                speedTestResultDisplay.textContent = parsedCache.estimateSourceInfo || 'Using cached speed estimate...'
+                speedTestResultDisplay.className = parsedCache.sourceInfoClass || ''
+              }
+              showEstimates(currentEstimates)
+              updateButtonTimeIndicators()
+              if (estimatesSection) estimatesSection.style.display = 'block'
+              if (timeEstimatesToggle) timeEstimatesToggle.style.display = 'block'
+              // console.log('Loaded speed results from cache.');
+              return true // Indicate cache was successfully used
+            } else {
+              currentEstimates = {}
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to load cached speed results:', e)
+          currentEstimates = {}
+        }
+        return false // Indicate cache was not used or was invalid
+      }
+      
+      async function fetchFreshSpeedResults() {
+        const speedTestResultDisplay = document.getElementById('speedTestResult')
+        const estimatesSection = document.getElementById('estimatesSection')
+        const timeEstimatesToggle = document.getElementById('timeEstimatesToggle')
+        const bookNameElement = document.querySelector('.container')
+        const bookName = bookNameElement ? bookNameElement.dataset.book : ''
+        const currentModelName = '{{ current_model_name }}' // Simplified initialization
+        const cacheKey = `cachedSpeedResults_${bookName}_${currentModelName}`
+        let usedCacheForInitialDisplay = false // Check if cache was already displayed
+        if (speedTestResultDisplay && speedTestResultDisplay.textContent === 'Using cached speed estimate...') {
+          usedCacheForInitialDisplay = true
+        }
+      
+        try {
+          if (!usedCacheForInitialDisplay && speedTestResultDisplay) {
+            speedTestResultDisplay.textContent = 'Loading saved speed estimate...'
+            speedTestResultDisplay.className = ''
+          }
+      
+          const uiSettings = getTranscriptionOptions()
+          const params = new URLSearchParams({
+            model: currentModelName,
+            word_timestamps: uiSettings.word_timestamps,
+            highlighting: uiSettings.highlighting
+          })
+      
+          const response = await fetch(`/api/speed-ratio?${params.toString()}`)
+          let usableSpeedRatio = 0
+          let estimateSourceInfo = 'No saved speed estimate found for current configuration.'
+          let sourceInfoClass = ''
+      
+          if (response.ok) {
+            const data = await response.json()
+            if (data && data.speed_ratio > 0) {
+              usableSpeedRatio = data.speed_ratio
+              const modelUsed = data.model_tested || currentModelName
+              const savedDate = data.timestamp ? new Date(data.timestamp).toLocaleDateString() : 'unknown date'
+              estimateSourceInfo = `Using saved speed for ${modelUsed} (tested ${savedDate}): ${parseFloat(usableSpeedRatio).toFixed(1)}x realtime`
+              sourceInfoClass = 'speed-success'
+            } else if (response.status === 404) {
+              estimateSourceInfo = `No saved speed test found for ${currentModelName} with settings: w_ts=${uiSettings.word_timestamps}, hl=${uiSettings.highlighting}`
+            } else {
+              estimateSourceInfo = data.message || 'Could not parse speed ratio data.'
+              sourceInfoClass = 'speed-error'
+            }
+          } else {
+            estimateSourceInfo = 'Could not load saved speed estimate.'
+            if (response.status !== 404) sourceInfoClass = 'speed-error'
+          }
+          if (speedTestResultDisplay) {
+            speedTestResultDisplay.textContent = estimateSourceInfo
+            speedTestResultDisplay.className = sourceInfoClass
+          }
+      
+          let freshEstimates = {}
+          if (usableSpeedRatio > 0) {
+            const fileInfoResponse = await fetch(`/api/book/${bookName}/file-info`)
+            if (fileInfoResponse.ok) {
+              const bookFileInfo = await fileInfoResponse.json()
+              if (Object.keys(bookFileInfo).length > 0) {
+                for (const mp3File in bookFileInfo) {
+                  if (bookFileInfo[mp3File] && typeof bookFileInfo[mp3File].duration === 'number') {
+                    const duration = bookFileInfo[mp3File].duration
+                    freshEstimates[mp3File] = { estimated_time: duration / usableSpeedRatio }
+                  }
+                }
+              }
+            }
+          }
+      
+          currentEstimates = freshEstimates
+          // console.log('Fetched fresh speed results.');
+      
+          if (Object.keys(currentEstimates).length > 0) {
+            showEstimates(currentEstimates)
+            updateButtonTimeIndicators()
+            if (estimatesSection) estimatesSection.style.display = 'block'
+            if (timeEstimatesToggle) timeEstimatesToggle.style.display = 'block'
+            try {
+              sessionStorage.setItem(cacheKey, JSON.stringify({ estimates: currentEstimates, estimateSourceInfo: estimateSourceInfo, sourceInfoClass: sourceInfoClass }))
+            } catch (e) {
+              console.warn('Failed to save speed results to sessionStorage', e)
+            }
+          } else {
+            showEstimates({})
+            updateButtonTimeIndicators()
+            if (estimatesSection) estimatesSection.style.display = 'none'
+            sessionStorage.removeItem(cacheKey)
+          }
+        } catch (error) {
+          console.error('Error loading fresh speed results:', error)
+          if (!usedCacheForInitialDisplay && speedTestResultDisplay) {
+            speedTestResultDisplay.textContent = 'Error loading speed estimates.'
+            speedTestResultDisplay.className = 'speed-error'
+            showEstimates({})
+            updateButtonTimeIndicators()
+          }
+        }
+      }
+      
+      // Unified Dark Mode Management
+      function toggleDarkMode() {
+        const oldIsDarkMode = document.body.classList.contains('dark-mode')
+        document.body.classList.toggle('dark-mode')
+        const newIsDarkMode = document.body.classList.contains('dark-mode')
+        localStorage.setItem('siteWideDarkMode', newIsDarkMode)
+        updateDarkModeButton()
+      
+        // Player settings default color synchronization
+        try {
+          let playerSettings = JSON.parse(localStorage.getItem('playerSettings'))
+          if (playerSettings) {
+            const lightDefaults = {
+              highlightColor: '#1976d2',
+              currentLineBg: '#e6f3ff',
+              currentLineOutline: '#000000',
+              currentLineThickness: 0 // Default thickness is 0 (no outline)
+            }
+            const darkDefaults = {
+              highlightColor: '#ffa726',
+              currentLineBg: '#2a4a6b',
+              currentLineOutline: '#ffffff',
+              currentLineThickness: 0 // Default thickness is 0 (no outline)
+            }
+      
+            let changed = false
+      
+            // Check highlightColor
+            if (!oldIsDarkMode && playerSettings.highlightColor === lightDefaults.highlightColor) {
+              playerSettings.highlightColor = darkDefaults.highlightColor
+              changed = true
+            } else if (oldIsDarkMode && playerSettings.highlightColor === darkDefaults.highlightColor) {
+              playerSettings.highlightColor = lightDefaults.highlightColor
+              changed = true
+            }
+      
+            // Check currentLineBg
+            if (!oldIsDarkMode && playerSettings.currentLineBg === lightDefaults.currentLineBg) {
+              playerSettings.currentLineBg = darkDefaults.currentLineBg
+              changed = true
+            } else if (oldIsDarkMode && playerSettings.currentLineBg === darkDefaults.currentLineBg) {
+              playerSettings.currentLineBg = lightDefaults.currentLineBg
+              changed = true
+            }
+      
+            // Check currentLineOutline and thickness (only update if both color and thickness were default)
+            const playerOutlineThickness = parseInt(playerSettings.currentLineThickness) || 0
+            if (!oldIsDarkMode && playerSettings.currentLineOutline === lightDefaults.currentLineOutline && playerOutlineThickness === lightDefaults.currentLineThickness) {
+              playerSettings.currentLineOutline = darkDefaults.currentLineOutline
+              playerSettings.currentLineThickness = darkDefaults.currentLineThickness // Ensure thickness also resets
+              changed = true
+            } else if (oldIsDarkMode && playerSettings.currentLineOutline === darkDefaults.currentLineOutline && playerOutlineThickness === darkDefaults.currentLineThickness) {
+              playerSettings.currentLineOutline = lightDefaults.currentLineOutline
+              playerSettings.currentLineThickness = lightDefaults.currentLineThickness // Ensure thickness also resets
+              changed = true
+            }
+      
+            if (changed) {
+              localStorage.setItem('playerSettings', JSON.stringify(playerSettings))
+              // console.log('Player settings updated for new theme defaults.');
+            }
+          }
+        } catch (e) {
+          console.error('Error updating player settings for theme change:', e)
+        }
+      
+        // Broadcast to other tabs/windows
+        window.postMessage({ type: 'darkModeChange', darkMode: newIsDarkMode }, '*')
+      }
+      
+      function updateDarkModeButton() {
+        const button = document.querySelector('.mode-controls button')
+        button.textContent = document.body.classList.contains('dark-mode') ? 'Light' : 'Dark'
+      }
+      
+      function applySiteWideDarkMode() {
+        const isDarkMode = localStorage.getItem('siteWideDarkMode') === 'true'
+        if (isDarkMode) {
+          document.body.classList.add('dark-mode')
+        } else {
+          document.body.classList.remove('dark-mode')
+        }
+        updateDarkModeButton()
+      }
+      
+      // Listen for dark mode changes from other tabs
+      window.addEventListener('message', function (event) {
+        if (event.data.type === 'darkModeChange') {
+          if (event.data.darkMode) {
+            document.body.classList.add('dark-mode')
+          } else {
+            document.body.classList.remove('dark-mode')
+          }
+          updateDarkModeButton()
+        }
+      })
+      
+      // Listen for storage changes (for cross-tab sync)
+      window.addEventListener('storage', function (event) {
+        if (event.key === 'siteWideDarkMode') {
+          applySiteWideDarkMode()
+        }
+      })
+      
+      function openLog() {
+        log.style.display = 'flex'
+        pre.scrollTop = pre.scrollHeight
+      }
+      
+      function hideLog() {
+        log.style.display = 'none'
+      }
+      
+      function saveLog() {
+        const a = document.createElement('a')
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+        a.download = 'whisper-' + timestamp + '.log'
+        a.href = URL.createObjectURL(new Blob([pre.textContent], { type: 'text/plain' }))
+        a.click()
+      }
+      
+      function genOne(buttonEl) {
+        const file = buttonEl.dataset.file
+        if (activeGenerations.has(file)) {
+          // console.log('Generation already in progress for:', file)
+          return
+        }
+      
+        activeGenerations.add(file)
+        buttonEl.disabled = true
+        const originalButtonHTML = buttonEl.innerHTML // Store full HTML for spinner
+        buttonEl.innerHTML = '<span class="spinner"></span> Generating...'
+      
+        const listItem = buttonEl.closest('li')
+        let statusSpan = listItem.querySelector('.file-info .generation-status-indicator')
+        if (!statusSpan) {
+          statusSpan = document.createElement('span')
+          statusSpan.className = 'generation-status-indicator run'
+          // Insert it before the main file name span, or at the start of file-info
+          const fileNameSpan = listItem.querySelector('.file-info > span:not([class]), .file-info > a')
+          if (fileNameSpan) {
+            fileNameSpan.parentNode.insertBefore(statusSpan, fileNameSpan)
+          } else {
+            listItem.querySelector('.file-info').prepend(statusSpan)
+          }
+        }
+        statusSpan.textContent = '[generating...]'
+        statusSpan.style.display = 'inline' // Ensure it's visible
+      
+        if (document.getElementById('showDebugLog').checked) {
+          openLog()
+        }
+        pre.textContent = `Starting transcription for ${file}...\n`
+      
+        const options = getTranscriptionOptions()
+        const payload = {
+          book: bookName,
+          mp3: file,
+          word_timestamps: options.word_timestamps,
+          highlight_words: options.highlight_words,
+          parallel_processing: options.parallel_processing,
+          max_workers: options.max_workers
+        }
+      
+        // Target /gen_one with POST and JSON body
+        stream('/gen_one', file, buttonEl, originalButtonHTML, statusSpan, payload)
+      }
+      
+      async function genAll() {
+        const generateAllBtn = document.getElementById('generateAllBtn')
+        if (generateAllBtn.disabled) {
+          // console.log('Generate ALL operation already in progress.')
+          return
+        }
+      
+        const chapterListItems = document.querySelectorAll('ul li')
+        const filesToGenerate = []
+        chapterListItems.forEach((item) => {
+          const button = item.querySelector('button.generate-button')
+          if (button && !button.disabled) {
+            // Check if there's a generate button and it's not already processing
+            filesToGenerate.push(button.dataset.file)
+          }
+        })
+      
+        if (filesToGenerate.length === 0) {
+          pre.textContent = 'All chapters seem to be transcribed or are currently processing.\n'
+          if (document.getElementById('showDebugLog').checked) {
+            openLog()
+          }
+          return
+        }
+      
+        if (document.getElementById('showDebugLog').checked) {
+          openLog()
+        }
+        pre.textContent = `Starting "Generate ALL" for ${filesToGenerate.length} file(s)...\n`
+        generateAllBtn.disabled = true
+        const originalGenAllText = generateAllBtn.innerHTML
+        generateAllBtn.innerHTML = '<span class="spinner"></span> Generating All...'
+      
+        activeGenerations.add('all_files') // Use a special key for genAll
+      
+        const options = getTranscriptionOptions()
+        const payload_all = {
+          book: bookName,
+          word_timestamps: options.word_timestamps,
+          highlight_words: options.highlight_words,
+          parallel_processing: options.parallel_processing,
+          max_workers: options.max_workers
+        }
+      
+        // Target /gen_all with POST and JSON body
+        // For genAll, we don't pass individual buttonEl. Stream will call refreshChapterList.
+        stream('/gen_all', 'all_files', generateAllBtn, originalGenAllText, null, payload_all)
+      }
+      
+      async function stream(url, filename, buttonEl = null, originalButtonHTML = 'Generate', statusSpanEl = null, payload = null) {
+        let isGenAll = filename === 'all_files'
+        try {
+          if ((document.getElementById('showDebugLog').checked && !log.style.display) || log.style.display === 'none') {
+            openLog()
+          }
+          pre.textContent += `\nConnecting to stream for ${filename}...\n`
+      
+          const fetchOptions = {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          }
+      
+          const response = await fetch(url, fetchOptions)
+          if (!response.ok) {
+            const errorText = await response.text()
+            throw new Error(`Server error: ${response.status} ${response.statusText}. ${errorText}`)
+          }
+      
+          const reader = response.body.getReader()
+          const decoder = new TextDecoder()
+      
+          if (isGenAll) {
+            document.querySelectorAll('#chapterList li').forEach((item) => {
+              const fileStatusIndicator = item.querySelector('.file-info .generation-status-indicator')
+              if (fileStatusIndicator && (fileStatusIndicator.textContent.includes('generating') || fileStatusIndicator.textContent.includes('pending'))) {
+                fileStatusIndicator.textContent = '[pending queue]'
+                fileStatusIndicator.style.display = 'inline'
+              }
+            })
+          }
+      
+          let done = false
+          while (!done) {
+            const { done: chunkDone, value } = await reader.read()
+            done = chunkDone
+            if (done) {
+              pre.textContent += `\nStream finished for ${filename}.\n`
+              break
+            }
+            const chunk = decoder.decode(value, { stream: true })
+            pre.textContent += chunk
+            pre.scrollTop = pre.scrollHeight // Auto-scroll log
+          }
+      
+          pre.textContent += `\nStream processing complete for ${filename}. Refreshing list...\n`
+          await refreshChapterList(false) // Pass false to not force scroll restoration here, let finally block handle it if needed
+        } catch (error) {
+          pre.textContent += `\nError during streaming for ${filename}: ${error.message}\n`
+          console.error(`Streaming error for ${filename}:`, error)
+          if (statusSpanEl) {
+            statusSpanEl.textContent = '[error]'
+            statusSpanEl.classList.remove('run')
+            statusSpanEl.classList.add('error')
+          }
+        } finally {
+          activeGenerations.delete(filename)
+          if (isGenAll) {
+            const genAllBtn = document.getElementById('generateAllBtn')
+            if (genAllBtn && genAllBtn.disabled) {
+              genAllBtn.disabled = false
+              genAllBtn.innerHTML = originalButtonHTML
+            }
+            await refreshChapterList(true) // Full refresh after genAll
+          } else if (buttonEl) {
+            // For single generations, refresh might be enough, but ensure the button is re-enabled if still there
+            // This path might be less common if refreshChapterList correctly rebuilds.
+            await refreshChapterList(true) // Full refresh after single gen
+          }
+        }
+      }
+      
+      async function refreshChapterList(restoreScroll = true) {
+        const scrollPosition = window.scrollY
+        const listElement = document.getElementById('chapterList')
+        if (!listElement) return
+      
+        try {
+          const response = await fetch(`/api/book/${bookName}/file-info`)
+          if (!response.ok) {
+            console.error('Failed to fetch file info:', response.status, await response.text())
+            listElement.innerHTML = '<li>Error loading chapter list.</li>'
+            return
+          }
+          const fileInfoData = await response.json()
+      
+          listElement.innerHTML = '' // Clear current list
+      
+          for (const filename in fileInfoData) {
+            const info = fileInfoData[filename]
+            const listItem = document.createElement('li')
+            listItem.dataset.filename = filename
+      
+            const fileInfoDiv = document.createElement('div')
+            fileInfoDiv.className = 'file-info'
+      
+            if (info.job_running || activeGenerations.has(filename)) {
+              const statusIndicator = document.createElement('span')
+              statusIndicator.className = 'generation-status-indicator run'
+              statusIndicator.textContent = activeGenerations.has(filename) && !info.job_running ? '[queued/generating client]' : '[transcribing server]'
+              fileInfoDiv.appendChild(statusIndicator)
+            }
+      
+            const nameSpan = document.createElement('span')
+            if (info.vtt_exists) {
+              const link = document.createElement('a')
+              link.href = `/player/${encodeURIComponent(bookName)}?file=${encodeURIComponent(filename)}`
+              link.textContent = filename
+              fileInfoDiv.appendChild(link)
+            } else {
+              nameSpan.textContent = filename
+              fileInfoDiv.appendChild(nameSpan)
+            }
+            listItem.appendChild(fileInfoDiv)
+      
+            const fileActionsDiv = document.createElement('div')
+            fileActionsDiv.className = 'file-actions'
+      
+            if (info.vtt_exists) {
+              const statusInfoDiv = document.createElement('div')
+              statusInfoDiv.className = 'file-status-info'
+              const tsSpan = document.createElement('span')
+              if (info.has_word_timestamps) {
+                tsSpan.className = 'word-timestamps'
+                tsSpan.textContent = '✓ word timestamps'
+              } else {
+                tsSpan.className = 'no-word-timestamps'
+                tsSpan.textContent = 'basic transcript'
+              }
+              statusInfoDiv.appendChild(tsSpan)
+              fileActionsDiv.appendChild(statusInfoDiv)
+            } else if (!info.job_running && !activeGenerations.has(filename)) {
+              const button = document.createElement('button')
+              button.className = 'generate-button'
+              button.dataset.file = filename
+              button.onclick = function () {
+                genOne(this)
+              }
+      
+              const timeIndicatorSpan = document.createElement('span')
+              timeIndicatorSpan.className = 'button-time-indicator'
+              timeIndicatorSpan.dataset.file = filename // For updateButtonTimeIndicators
+              button.appendChild(timeIndicatorSpan)
+      
+              button.append('Generate') // Add text node after span
+              fileActionsDiv.appendChild(button)
+            } else {
+              // If job is running (either server confirmed or client initiated via activeGenerations)
+              // and no VTT yet, show a placeholder or disabled state if needed.
+              // The statusIndicator in fileInfoDiv already covers this.
+            }
+            listItem.appendChild(fileActionsDiv)
+            listElement.appendChild(listItem)
+          }
+      
+          updateButtonTimeIndicators() // Uses currentEstimates which should be up-to-date
+          highlightCurrentChapter() // Re-apply highlighting
+          syncActiveGenerationsWithUI(fileInfoData) // Sync client-side generation status with new DOM & server reality
+        } catch (error) {
+          console.error('Error refreshing chapter list:', error)
+          listElement.innerHTML = '<li>Error refreshing chapter list. See console.</li>'
+        } finally {
+          if (restoreScroll) {
+            window.scrollTo(0, scrollPosition)
+          }
+        }
+      }
+      
+      // Chapter progress tracking
+      function saveCurrentChapter(book, chapter) {
+        const progress = {
+          book: book,
+          currentChapter: chapter,
+          timestamp: Date.now()
+        }
+        localStorage.setItem('chapterProgress', JSON.stringify(progress))
+      }
+      
+      function loadCurrentChapter() {
+        const saved = localStorage.getItem('chapterProgress')
+        if (saved) {
+          try {
+            const progress = JSON.parse(saved)
+            const book = document.querySelector('.container').dataset.book
+            // Only restore if it's the same book and within the last 24 hours
+            if (progress.book === book && Date.now() - progress.timestamp < 86400000) {
+              // 24 hours
+              return progress.currentChapter
+            }
+          } catch (e) {
+            console.error('Error loading chapter progress:', e)
+          }
+        }
+        return null
+      }
+      
+      function highlightCurrentChapter() {
+        const currentChapter = loadCurrentChapter()
+        if (currentChapter) {
+          // Add resume section at the top
+          const container = document.querySelector('.container')
+          const existingResume = document.getElementById('resumeSection')
+          const resumeLinkUrl = '/player/' + encodeURIComponent(bookName) + '?file=' + encodeURIComponent(currentChapter)
+      
+          if (!existingResume) {
+            const resumeSection = document.createElement('div')
+            resumeSection.id = 'resumeSection' // ID for CSS targeting
+      
+            const resumeLinkWrapper = document.createElement('a')
+            resumeLinkWrapper.href = resumeLinkUrl
+            resumeLinkWrapper.className = 'resume-link-wrapper' // For styling the link area
+      
+            const resumeTextContent = document.createElement('div')
+            resumeTextContent.className = 'resume-text-content' // Class for styling text
+            resumeTextContent.innerHTML = `
+                                                                      <strong>Resume Reading</strong>
+                                                                      <span class="resume-subtitle">Continue from: ${currentChapter}</span>
+                                                                  `
+            resumeLinkWrapper.appendChild(resumeTextContent)
+      
+            const resumeButton = document.createElement('button')
+            resumeButton.textContent = 'Continue'
+            resumeButton.className = 'resume-button'
+            resumeButton.onclick = function () {
+              window.location.href = resumeLinkUrl
+            }
+      
+            resumeSection.appendChild(resumeLinkWrapper)
+            resumeSection.appendChild(resumeButton)
+      
+            const mainControls = document.querySelector('.main-controls')
+            if (mainControls && mainControls.parentNode) {
+              mainControls.parentNode.insertBefore(resumeSection, mainControls.nextSibling)
+            }
+          }
+      
+          // Highlight the current chapter in the list
+          document.querySelectorAll('li').forEach((li) => {
+            const link = li.querySelector('a')
+            const span = li.querySelector('span')
+            const filename = link ? decodeURIComponent(new URL(link.href).searchParams.get('file')) : span ? span.textContent : null
+      
+            if (filename === currentChapter) {
+              li.style.border = '2px solid var(--link-color)'
+              li.style.backgroundColor = 'var(--current-bg)'
+      
+              // Add a "Current" indicator (no emoji)
+              if (!li.querySelector('.current-chapter-indicator')) {
+                const indicator = document.createElement('span')
+                indicator.className = 'current-chapter-indicator'
+                indicator.textContent = 'CURRENT'
+      
+                const fileActions = li.querySelector('.file-actions')
+                if (fileActions) {
+                  fileActions.appendChild(indicator)
+                }
+              }
+            }
+          })
+        }
+      }
+      
+      function syncActiveGenerationsWithServerState() {
+        // This function is now less critical if refreshChapterList correctly uses fileInfoData.job_running.
+        // However, it can still be useful to ensure buttons for client-side initiated jobs in activeGenerations
+        // (that might not yet be reflected on server if fileInfoData was fetched before job start) are disabled.
+        // We'll rename it and call it after list render.
+        console.warn('syncActiveGenerationsWithServerState is deprecated, use syncActiveGenerationsWithUI')
+      }
+      
+      function syncActiveGenerationsWithUI(fileInfoData = null) {
+        document.querySelectorAll('#chapterList li').forEach((item) => {
+          const fileName = item.dataset.filename
+          if (!fileName) return
+      
+          const serverJobRunning = fileInfoData && fileInfoData[fileName] && fileInfoData[fileName].job_running
+          const clientJobActive = activeGenerations.has(fileName)
+      
+          if (clientJobActive && !serverJobRunning) {
+            // Job was started by this client, not yet confirmed by server in this fileInfoData snapshot
+            // Or server job finished but client set not updated.
+            // Ensure UI reflects active generation from client's perspective if not VTT yet.
+            if (!fileInfoData || !fileInfoData[fileName] || !fileInfoData[fileName].vtt_exists) {
+              let statusIndicator = item.querySelector('.file-info .generation-status-indicator')
+              if (!statusIndicator) {
+                statusIndicator = document.createElement('span')
+                statusIndicator.className = 'generation-status-indicator run'
+                const nameElement = item.querySelector('.file-info > span, .file-info > a')
+                if (nameElement) nameElement.parentNode.insertBefore(statusIndicator, nameElement)
+                else item.querySelector('.file-info').prepend(statusIndicator)
+              }
+              statusIndicator.textContent = '[generating...]'
+              statusIndicator.style.display = 'inline'
+      
+              const btn = item.querySelector('.file-actions .generate-button')
+              if (btn) {
+                btn.disabled = true
+                btn.innerHTML = '<span class="spinner"></span> Generating...'
+              }
+            }
+          } else if (serverJobRunning) {
+            // Server says it's running. refreshChapterList should have handled this.
+            // But ensure activeGenerations set is consistent.
+            if (!clientJobActive) activeGenerations.add(fileName)
+          }
+        })
+      }
+      
+      // ULTRA-MINIMAL LOADING - Only show chapter list immediately
+      document.addEventListener('DOMContentLoaded', function () {
+        // Only apply dark mode - everything else deferred
+        applySiteWideDarkMode()
+      
+        // Everything else happens after the page is visible
+        requestAnimationFrame(() => {
+          setTimeout(initializeBookFeatures, 0)
+        })
+      })
+      
+      function initializeBookFeatures() {
+        // Load features in tiny chunks with longer delays
+        tryLoadCachedWhisperCapabilities() // Check cache immediately
+        tryLoadCachedSpeedResults() // Check speed results cache immediately
+      
+        // Initial population of the chapter list.
+        // Subsequent updates happen via genOne/genAll -> stream -> refreshChapterList
+        refreshChapterList(true).then(() => {
+          // These depend on the DOM being populated by refreshChapterList
+          setTimeout(() => {
+            try {
+              highlightCurrentChapter()
+            } catch (e) {
+              /* console.log('Chapter highlight failed:', e); */
+            }
+          }, 50) // Small delay after list render
+      
+          // syncActiveGenerationsWithUI is now called at the end of refreshChapterList
+        })
+      
+        setTimeout(() => {
+          try {
+            loadTranscriptionSettings()
+          } catch (e) {
+            // console.log('Settings load failed:', e);
+          }
+        }, 200)
+      
+        setTimeout(() => {
+          try {
+            setupSettingsListeners()
+          } catch (e) {
+            // console.log('Listeners setup failed:', e);
+          }
+        }, 300)
+      
+        setTimeout(() => {
+          try {
+            fetchFreshWhisperCapabilities() // Fetch fresh data with a delay
+          } catch (e) {
+            // console.error('Critical error in fetchFreshWhisperCapabilities:', e);
+          }
+        }, 500)
+      
+        setTimeout(() => {
+          try {
+            // fetchFreshSpeedResults also calls updateButtonTimeIndicators inside it.
+            fetchFreshSpeedResults() // Fetch fresh speed results with a delay
+          } catch (e) {
+            // console.error('Critical error in fetchFreshSpeedResults initialization:', e);
+            const speedTestResultDisplay = document.getElementById('speedTestResult')
+            if (speedTestResultDisplay && !speedTestResultDisplay.textContent.includes('cached')) {
+              speedTestResultDisplay.textContent = 'Error loading estimates features.'
+              speedTestResultDisplay.className = 'speed-error'
+            }
+          }
+        }, 1000)
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audiobook Library</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}" />
+    <link rel="prefetch" href="{{ url_for('static', filename='css/book.css') }}" as="style" />
+  </head>
+  <body>
+    <div class="mode-controls">
+      <button onclick="toggleDarkMode()">Dark</button>
+    </div>
+
+    <div class="container">
+      <h1>Audiobooks</h1>
+      <ul>
+        {% for book in books %}
+          <li>
+            <a href="{{ url_for('view_book', book=book) }}">{{ book }}</a>
+          </li>
+        {% endfor %}
+        {% if not books %}
+          <li class="empty">(add sub-folders to ./books)</li>
+        {% endif %}
+      </ul>
+    </div>
+
+    <script>
+      // Unified Dark Mode Management
+      function toggleDarkMode() {
+        document.body.classList.toggle('dark-mode')
+        const isDarkMode = document.body.classList.contains('dark-mode')
+        localStorage.setItem('siteWideDarkMode', isDarkMode)
+        updateDarkModeButton()
+      
+        // Broadcast to other tabs/windows
+        window.postMessage({ type: 'darkModeChange', darkMode: isDarkMode }, '*')
+      }
+      
+      function updateDarkModeButton() {
+        const button = document.querySelector('.mode-controls button')
+        button.textContent = document.body.classList.contains('dark-mode') ? 'Light' : 'Dark'
+      }
+      
+      function applySiteWideDarkMode() {
+        const isDarkMode = localStorage.getItem('siteWideDarkMode') === 'true'
+        if (isDarkMode) {
+          document.body.classList.add('dark-mode')
+        } else {
+          document.body.classList.remove('dark-mode')
+        }
+        updateDarkModeButton()
+      }
+      
+      // Listen for dark mode changes from other tabs
+      window.addEventListener('message', function (event) {
+        if (event.data.type === 'darkModeChange') {
+          if (event.data.darkMode) {
+            document.body.classList.add('dark-mode')
+          } else {
+            document.body.classList.remove('dark-mode')
+          }
+          updateDarkModeButton()
+        }
+      })
+      
+      // Listen for storage changes (for cross-tab sync)
+      window.addEventListener('storage', function (event) {
+        if (event.key === 'siteWideDarkMode') {
+          applySiteWideDarkMode()
+        }
+      })
+      
+      // Initialize
+      applySiteWideDarkMode()
+    </script>
+  </body>
+</html>

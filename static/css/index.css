@@ -1,0 +1,108 @@
+:root {
+    --bg-color: #f5f5f5;
+    --container-bg: white;
+    --text-color: #333;
+    --border-color: #ddd;
+    --link-color: #2196f3;
+    --muted-color: #666;
+    --button-bg: #f8f9fa;
+    /* Default button background for index */
+    --button-hover: #e9ecef;
+    /* Default button hover for index */
+}
+
+body.dark-mode {
+    --bg-color: #1a1a1a;
+    --container-bg: #2d2d2d;
+    --text-color: #e0e0e0;
+    --border-color: #444;
+    --link-color: #5ba0d0;
+    --muted-color: #aaa;
+    --button-bg: #404040;
+    /* Dark mode button background for index */
+    --button-hover: #505050;
+    /* Dark mode button hover for index */
+}
+
+body {
+    font-family: sans-serif;
+    margin: 20px;
+    background: var(--bg-color);
+    color: var(--text-color);
+    transition: background 0.3s, color 0.3s;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    background: var(--container-bg);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: background 0.3s;
+}
+
+h1 {
+    margin-top: 0;
+    color: var(--text-color);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+}
+
+ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+li {
+    margin: 10px 0;
+    padding: 10px;
+    background: var(--button-bg);
+    /* Use index-specific button color */
+    border-radius: 4px;
+    transition: background 0.3s;
+}
+
+a {
+    font-weight: bold;
+    text-decoration: none;
+    color: var(--link-color);
+    transition: color 0.2s;
+}
+
+a:hover {
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+p {
+    margin-top: 20px;
+    color: var(--muted-color);
+    font-size: 0.9em;
+}
+
+.mode-controls {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+}
+
+.mode-controls button {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    background: var(--container-bg);
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-color);
+    font-size: 12px;
+    font-weight: 500;
+    transition: background 0.2s, box-shadow 0.2s;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.mode-controls button:hover {
+    background: var(--button-hover);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}

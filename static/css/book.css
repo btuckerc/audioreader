@@ -1,0 +1,773 @@
+:root {
+    --bg-color: #f5f5f5;
+    --container-bg: white;
+    --text-color: #333;
+    --border-color: #ddd;
+    --link-color: #2196f3;
+    --success-color: #28a745;
+    --warning-color: #ffc107;
+    --error-color: #dc3545;
+    --disabled-color: #6c757d;
+    --resume-color: #17a2b8;
+    --current-indicator-color: #6c757d;
+    --processing-color: #007bff;
+    --current-bg: #e6f3ff;
+    /* Light mode background for current/resume items */
+
+    /* Button colors specific to book.html */
+    --button-bg: #e9ecef;
+    /* Lighter than index/player default */
+    --button-hover: #dee2e6;
+
+    /* New root vars for resume button */
+    --resume-color-hover: #149cb1;
+}
+
+body.dark-mode {
+    --bg-color: #1a1a1a;
+    --container-bg: #2d2d2d;
+    --text-color: #e0e0e0;
+    --border-color: #444;
+    --link-color: #5ba0d0;
+    --success-color: #34ce57;
+    --warning-color: #f8d24e;
+    --error-color: #f87171;
+    --disabled-color: #8895a1;
+    --resume-color: #38c1d9;
+    /* Brighter resume color for dark mode */
+    --current-indicator-color: #8895a1;
+    --processing-color: #58a6ff;
+    --current-bg: #3a4a5f;
+    /* Darker, desaturated blue for current/resume items in dark mode */
+    --resume-color-hover: #2ca7bd;
+
+    /* Button colors specific to book.html - dark mode */
+    --button-bg: #505050;
+    --button-hover: #606060;
+}
+
+body {
+    font-family: sans-serif;
+    margin: 20px;
+    background: var(--bg-color);
+    color: var(--text-color);
+    transition: background 0.3s, color 0.3s;
+}
+
+.container {
+    max-width: 1000px;
+    /* Consistent with player.html */
+    margin: 0 auto;
+    background: var(--container-bg);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: background 0.3s;
+}
+
+.back-link {
+    display: inline-block;
+    margin-bottom: 25px;
+    color: var(--link-color);
+    text-decoration: none;
+    font-size: 16px;
+    transition: opacity 0.2s;
+}
+
+.back-link:hover {
+    opacity: 0.7;
+    text-decoration: underline;
+}
+
+h1 {
+    margin-top: 0;
+    color: var(--text-color);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 15px;
+    margin-bottom: 25px;
+    font-size: 28px;
+    letter-spacing: -0.5px;
+}
+
+.transcription-options {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin-bottom: 25px;
+    background: var(--container-bg);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.transcription-header {
+    padding: 12px 18px;
+    background: var(--button-bg);
+    /* Slightly different from player settings header */
+    border-radius: 8px 8px 0 0;
+    /* Match container */
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    transition: background 0.2s;
+}
+
+.transcription-header:hover {
+    background: var(--button-hover);
+}
+
+.transcription-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.fold-indicator {
+    font-size: 1.2em;
+    transition: transform 0.3s;
+    color: var(--text-color);
+}
+
+.fold-indicator.expanded {
+    transform: rotate(180deg);
+}
+
+.transcription-content {
+    padding: 20px;
+    display: none;
+    /* Hidden by default */
+    border-top: 1px solid var(--border-color);
+    background: var(--container-bg);
+    /* Ensure background consistency */
+    border-radius: 0 0 8px 8px;
+    /* Match container */
+}
+
+.transcription-content.expanded {
+    display: block;
+}
+
+.option-group {
+    margin-bottom: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    /* Space between elements in a group */
+}
+
+.option-group:last-child {
+    margin-bottom: 0;
+}
+
+.option-group label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--text-color);
+    cursor: pointer;
+    /* Make the whole label clickable for checkbox */
+}
+
+.option-group input[type='checkbox'] {
+    margin: 0;
+    height: 16px;
+    width: 16px;
+    accent-color: var(--link-color);
+}
+
+.option-group input[type='number'] {
+    width: 50px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--container-bg);
+    color: var(--text-color);
+    font-size: 13px;
+}
+
+.capability-status {
+    font-size: 0.8em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 500;
+    text-transform: uppercase;
+    margin-left: 5px;
+    /* Space it from the label text */
+}
+
+.capability-available {
+    background-color: var(--success-color);
+    color: white;
+}
+
+.capability-unavailable {
+    background-color: var(--error-color);
+    color: white;
+}
+
+.speed-test-button {
+    padding: 8px 15px;
+    font-size: 14px;
+    font-weight: 500;
+    background: var(--link-color);
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    align-self: flex-start;
+    /* Align button to the start of the flex column */
+}
+
+.speed-test-button:hover {
+    background: #1a7ece;
+    /* Darken link color */
+}
+
+.speed-test-button:active {
+    transform: scale(0.98);
+}
+
+.speed-test-button:disabled {
+    background: var(--disabled-color);
+    cursor: not-allowed;
+}
+
+#speedTestResult {
+    font-size: 0.9em;
+    margin-left: 10px;
+    padding: 5px 8px;
+    border-radius: 4px;
+}
+
+#speedTestResult.speed-success {
+    background-color: var(--success-color);
+    color: white;
+}
+
+#speedTestResult.speed-error {
+    background-color: var(--error-color);
+    color: white;
+}
+
+.estimates-header {
+    padding: 10px 15px;
+    background: var(--button-bg);
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    transition: background 0.2s;
+    margin-bottom: 10px;
+    /* Space from content */
+}
+
+.estimates-header:hover {
+    background: var(--button-hover);
+}
+
+.estimates-header h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.estimates-content {
+    padding: 0 15px 15px 15px;
+    display: none;
+    /* Hidden by default */
+}
+
+.estimates-content.expanded {
+    display: block;
+}
+
+.estimate-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 0.9em;
+    border-bottom: 1px dashed var(--border-color);
+}
+
+.estimate-item:last-child {
+    border-bottom: none;
+}
+
+.estimate-filename {
+    color: var(--text-color);
+    max-width: 70%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.estimate-time {
+    color: var(--link-color);
+    font-weight: 500;
+}
+
+.total-time-info {
+    font-size: 0.95em;
+    font-weight: bold;
+    text-align: right;
+    margin-top: 10px;
+    padding-right: 15px;
+    /* Align with estimates */
+    color: var(--text-color);
+}
+
+.main-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+    padding: 15px;
+    background: var(--container-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.main-controls button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 500;
+    transition: background 0.2s, transform 0.1s;
+}
+
+.main-controls button:active {
+    transform: scale(0.98);
+}
+
+.main-controls .main-controls-left button {
+    background: var(--button-bg);
+    /* Use book-specific button color */
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    /* Add border for definition */
+}
+
+.main-controls .main-controls-left button:hover {
+    background: var(--button-hover);
+}
+
+.main-controls .main-controls-right {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+#whisperStatus {
+    font-size: 0.9em;
+    font-weight: 500;
+    padding: 6px 10px;
+    border-radius: 4px;
+}
+
+.status-indicator.capability-available {
+    background-color: var(--success-color);
+    color: white;
+}
+
+.status-indicator.capability-unavailable {
+    background-color: var(--error-color);
+    color: white;
+}
+
+#generateAllBtn {
+    background: var(--success-color);
+    color: white;
+}
+
+#generateAllBtn:hover {
+    background: #1e7e34;
+    /* Darken success color */
+}
+
+ul {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    /* Remove default ul margin */
+}
+
+li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    margin-bottom: 10px;
+    background: var(--container-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    transition: background 0.2s, box-shadow 0.2s;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+li:hover {
+    background: var(--button-bg);
+    /* Subtle hover */
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+}
+
+.file-info {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    text-align: left;
+    gap: 5px;
+    justify-content: flex-start;
+}
+
+.file-info a,
+.file-info span:first-child {
+    font-weight: 500;
+    color: var(--link-color);
+    text-decoration: none;
+    font-size: 16px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-right: auto;
+}
+
+.file-info>span:not([class]),
+.file-info>a {
+    justify-self: flex-start;
+    margin-right: auto;
+}
+
+.file-info a:hover {
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+.file-info .run {
+    /* For [transcribing] text */
+    color: var(--warning-color);
+    font-weight: bold;
+    font-size: 0.9em;
+}
+
+.file-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    /* Prevent shrinking */
+    margin-left: 15px;
+    /* Space from file info */
+}
+
+.file-status-info {
+    font-size: 0.85em;
+    text-align: right;
+}
+
+.file-status-info .word-timestamps {
+    color: var(--success-color);
+    font-weight: 500;
+}
+
+.file-status-info .no-word-timestamps {
+    color: var(--text-color);
+    opacity: 0.7;
+}
+
+.generate-button {
+    padding: 8px 15px;
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--link-color);
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    display: flex;
+    /* For time indicator */
+    align-items: center;
+    gap: 5px;
+    /* Space between text and time */
+}
+
+.generate-button:hover {
+    background: #1a7ece;
+    /* Darken link color */
+}
+
+.generate-button:active {
+    transform: scale(0.98);
+}
+
+.button-time-indicator {
+    font-size: 0.8em;
+    opacity: 0.8;
+}
+
+#log {
+    display: none;
+    /* Initially hidden */
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 300px;
+    background: var(--container-bg);
+    border-top: 2px solid var(--border-color);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+    z-index: 1001;
+    /* Above mode controls if they overlap */
+    flex-direction: column;
+}
+
+#log .controls {
+    padding: 8px 15px;
+    background: var(--button-bg);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-shrink: 0;
+    /* Prevent shrinking */
+}
+
+#log .controls button {
+    padding: 6px 12px;
+    font-size: 13px;
+    background: var(--container-bg);
+    /* Match log background */
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+#log .controls button:hover {
+    background: var(--button-hover);
+}
+
+#log pre {
+    flex-grow: 1;
+    padding: 15px;
+    margin: 0;
+    font-family: monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-color);
+    background: var(--container-bg);
+    /* Ensure consistent bg */
+    overflow: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Resume Reading Section */
+#resumeSection {
+    background: var(--current-bg);
+    /* Uses the theme-aware --current-bg */
+    border: 1px solid var(--border-color);
+    border-left: 5px solid var(--resume-color);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin: 25px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+#resumeSection .resume-text-content strong {
+    color: var(--resume-color);
+    font-size: 1.2em;
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 700;
+}
+
+#resumeSection .resume-text-content .resume-subtitle {
+    font-size: 0.95em;
+    /* Subtitle color should now contrast against the new --current-bg values */
+    /* In dark mode, --current-bg is dark, so --text-color (light) is good. */
+    /* In light mode, --current-bg is light, so --text-color (dark) is good. */
+    color: var(--text-color);
+    opacity: 0.8;
+    /* Slightly reduced opacity for subtitle feel, but should still be very readable */
+}
+
+#resumeSection a.resume-link-wrapper {
+    text-decoration: none;
+    color: inherit;
+    flex-grow: 1;
+}
+
+.resume-button {
+    padding: 10px 22px;
+    font-size: 0.95em;
+    font-weight: 600;
+    background: var(--resume-color);
+    color: #ffffff;
+    /* White text should contrast well with var(--resume-color) */
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.resume-button:hover {
+    background: var(--resume-color-hover);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
+}
+
+.resume-button:active {
+    transform: scale(0.98) translateY(0);
+}
+
+/* Current Chapter Indicator in List */
+li .current-chapter-indicator {
+    font-size: 0.8em;
+    font-weight: bold;
+    color: var(--current-indicator-color);
+    /* Muted color */
+    margin-left: auto;
+    /* Pushes it to the right within file-actions */
+    padding: 3px 6px;
+    background: var(--button-bg);
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+
+li[style*="border: 2px solid var(--link-color)"] {
+    /* Target specifically highlighted LI */
+    border-color: var(--resume-color) !important;
+    /* Ensure resume color for border */
+    background-color: var(--current-bg) !important;
+    /* Ensure resume bg for current */
+}
+
+.mode-controls {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    gap: 8px;
+    z-index: 1000;
+}
+
+.mode-controls button {
+    padding: 8px 12px;
+    /* Smaller padding for mode buttons */
+    border: 1px solid var(--border-color);
+    background: var(--container-bg);
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-color);
+    font-size: 12px;
+    font-weight: 500;
+    transition: background 0.2s, box-shadow 0.2s;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(5px);
+    /* Subtle blur for mode buttons */
+}
+
+.mode-controls button:hover {
+    background: var(--button-hover);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
+/* Spinner animation */
+.spinner {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spinner-border .75s linear infinite;
+    vertical-align: text-bottom;
+    margin-right: 0.5em;
+}
+
+@keyframes spinner-border {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Generation status indicator styles */
+.generation-status-indicator {
+    font-style: italic;
+    margin-right: 5px;
+    font-size: 0.9em;
+    display: inline-block;
+    order: -1;
+}
+
+.generation-status-indicator.run {
+    color: var(--processing-color);
+}
+
+.generation-status-indicator.error {
+    color: var(--error-color);
+    font-weight: bold;
+}
+
+/* Adjustments for Generate All button if it has a spinner */
+#generateAllBtn .spinner {
+    width: 0.9em;
+    height: 0.9em;
+}
+
+/* Style for buttons in a generating state */
+.generate-button:disabled,
+#generateAllBtn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.generate-button:disabled .spinner,
+#generateAllBtn:disabled .spinner {
+    /* Ensure spinner is visible even if button text color changes on disable */
+    border-left-color: var(--text-color);
+    border-bottom-color: var(--text-color);
+    border-top-color: var(--text-color);
+    /* border-right-color will remain transparent */
+}
+
+/* Style for the dynamically added 'Show Log' button for active jobs */
+.show-log-button.minimal-button {
+    padding: 6px 10px;
+    font-size: 0.85em;
+    /* Smaller text */
+    background-color: var(--button-bg);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.show-log-button.minimal-button:hover {
+    background-color: var(--button-hover);
+}
+
+/* Ensure it aligns well if other items are in file-actions */
+.file-actions .show-log-button.minimal-button {
+    /* margin-left: auto; */
+    /* If you want to push it to the far right of actions */
+}
