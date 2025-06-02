@@ -39,7 +39,7 @@ BASE   = Path(__file__).resolve().parent
 BOOKS  = BASE / "books"
 # SPEED_RATIOS_FILE is used to store speed ratios for model+settings combinations
 SPEED_RATIOS_FILE = BASE / "speed_ratios.json"
-MODEL  = "medium" # Default model for transcriptions and speed tests
+MODEL  = "small" # Default model for transcriptions and speed tests
 
 _jobs: dict[tuple[str, str], subprocess.Popen] = {}
 _lock = threading.Lock()
@@ -246,11 +246,19 @@ def test_whisper_speed(test_audio_path: Path, model_to_test: str, test_settings:
 
 # ───────────────────────── whisper streamer ───────────────────────
 def whisper_stream(book: str, mp3: str, enable_word_timestamps: bool = True, enable_highlighting: bool = True):
+    app.logger.info(f"whisper_stream invoked with book='{book}', mp3='{mp3}'")
+    app.logger.info(f"Script BASE directory (from Path(__file__).resolve().parent): {BASE}")
+    app.logger.info(f"Calculated BOOKS directory: {BOOKS}")
+
     folder = BOOKS / book
     mp3_path = folder / mp3
 
+    app.logger.info(f"Calculated folder for this job: {folder}")
+    app.logger.info(f"Calculated mp3_path for this job: {mp3_path}")
+
     # Ensure the MP3 file exists
     if not mp3_path.exists():
+        app.logger.error(f"CRITICAL: MP3 file NOT FOUND at resolved path: {mp3_path} - This will cause Whisper to fail.")
         yield f"Error: MP3 file not found: {mp3_path}\n"
         return
 
@@ -277,22 +285,34 @@ def whisper_stream(book: str, mp3: str, enable_word_timestamps: bool = True, ena
 
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                stderr=subprocess.PIPE, text=True, bufsize=1,
+                                creationflags=0 if os.name != 'nt' else subprocess.CREATE_NO_WINDOW)
         with _lock:
             _jobs[(book, mp3)] = proc
 
-        # Simplified line-by-line reading without complex progress parsing
-        for line in iter(proc.stdout.readline, ''):
-            line = line.rstrip()
-            if not line:
-                continue
+        # Stream stdout
+        if proc.stdout:
+            for line in iter(proc.stdout.readline, ''):
+                line = line.rstrip()
+                if not line:
+                    continue
+                yield line + '\n'
+            proc.stdout.close()
 
-            # Just yield all non-empty lines - much simpler and more reliable
-            yield line + '\n'
+        # Wait for the process to complete and capture stderr
+        stderr_output = ""
+        if proc.stderr:
+            stderr_output = proc.stderr.read()
+            proc.stderr.close()
 
-        proc.wait()
+        return_code = proc.wait()
+
         with _lock:
             _jobs.pop((book, mp3), None)
+
+        if stderr_output:
+            app.logger.error(f"Whisper process stderr for {mp3}:\n{stderr_output}")
+            yield f"\nSTDERR from Whisper:\n{stderr_output}\n"
 
         # Verify the VTT file was created
         expected_vtt = caption_path(book, mp3)
@@ -303,12 +323,13 @@ def whisper_stream(book: str, mp3: str, enable_word_timestamps: bool = True, ena
         else:
             yield f"\nWARNING: Expected VTT file not found at {expected_vtt}\n"
 
-        if proc.returncode != 0:
-            yield f"\nERROR: Whisper process failed with exit code {proc.returncode}\n"
+        if return_code != 0:
+            yield f"\nERROR: Whisper process failed with exit code {return_code}\n"
         else:
             yield f"\n[DONE {mp3} - SUCCESS]\n"
 
     except Exception as e:
+        app.logger.error(f"Exception in whisper_stream for {mp3}: {str(e)}", exc_info=True)
         yield f"\nEXCEPTION: {str(e)}\n"
         with _lock:
             _jobs.pop((book, mp3), None)
