@@ -29,15 +29,16 @@ While named "audiobook server," it can be used for any collection of MP3 files y
 Before running the `setup.sh` script, ensure you have the following generally available on your system:
 
 *   **`bash`:** To execute the `setup.sh` script.
-*   **Standard Build Tools:** If `pyenv` needs to install Python from source (e.g., if a pre-compiled binary isn't available for your system for version `3.11.8`), you'll need standard build tools (like `gcc`, `make`, `libssl-dev`, `zlib1g-dev`, etc., depending on your OS). `pyenv install <version>` usually provides guidance if dependencies are missing.
+*   **`git`:** Required if `setup.sh` needs to guide you through installing `pyenv`.
+*   **Standard Build Tools:** If `pyenv` (or its installation process) needs to install Python from source (e.g., if a pre-compiled binary isn't available for your system for version `3.11.4`), you'll need standard build tools (like `gcc`, `make`, `libssl-dev`, `zlib1g-dev`, etc., depending on your OS). `pyenv install <version>` usually provides guidance if dependencies are missing during its own process.
 *   **`ffmpeg` (and `ffprobe`):**
     *   These are crucial for full application functionality: creating test audio clips for speed tests and getting accurate audio durations.
     *   The `setup.sh` script will check if `ffmpeg` and `ffprobe` are accessible in your system's PATH. If not, it will provide guidance on how to install them for common operating systems.
     *   It is highly recommended to install `ffmpeg` before or immediately after running `setup.sh` if the script indicates they are missing.
 *   **Python Version Management (Recommended: `pyenv`):**
-    *   The `setup.sh` script is designed to work best with `pyenv` ([https://github.com/pyenv/pyenv](https://github.com/pyenv/pyenv)) for managing Python versions. It will attempt to install and use Python `3.11.8` (or the version specified in `PYTHON_VERSION_TARGET` within the script) via `pyenv`.
+    *   The `setup.sh` script is designed to work best with `pyenv` ([https://github.com/pyenv/pyenv](https://github.com/pyenv/pyenv)) for managing Python versions. It will attempt to install and use Python `3.11.4` (or the version specified in `PYTHON_VERSION_TARGET` within the script) via `pyenv`.
     *   If `pyenv` is not found, the script will attempt to use a fallback command `python3.11` to set up the environment.
-    *   If neither `pyenv` can set up the target Python version nor the fallback `python3.11` command is found/functional, the script will guide you on how to proceed (e.g., install `pyenv` or the required Python version manually).
+    *   If neither `pyenv` can set up the target Python version nor the fallback `python3.11` command is found/functional, the script will offer an **interactive prompt** to guide you through cloning `pyenv` using `git`. This guidance includes manual steps you'll need to take to configure your shell for `pyenv` before re-running `setup.sh`.
     *   Having `pip` (Python package installer, usually comes with Python) is implicitly required for the Python installation that `setup.sh` ultimately uses.
 
 ## Installation
@@ -53,11 +54,12 @@ Before running the `setup.sh` script, ensure you have the following generally av
     This script performs several actions to set up your Python environment and install dependencies:
     *   **`ffmpeg` Check:** Verifies if `ffmpeg` and `ffprobe` are installed and guides you if they are missing.
     *   **Python Environment Setup (using `pyenv` if available):**
-        *   If `pyenv` is detected, it attempts to install Python `3.11.8` (or the `PYTHON_VERSION_TARGET` in the script) if not already installed by `pyenv`.
+        *   If `pyenv` is detected, it attempts to install Python `3.11.4` (or the `PYTHON_VERSION_TARGET` in the script) if not already installed by `pyenv`.
         *   It then sets this Python version as the local version for the `audioreader` directory by creating/updating a `.python-version` file.
         *   It uses this `pyenv`-managed Python to create a virtual environment named `venv`.
         *   If `pyenv` is not found, it attempts to use `python3.11` (the `PYTHON_COMMAND_FALLBACK` in the script) to create the `venv`.
-        *   If Python setup fails, the script will provide an error message and exit.
+        *   If both `pyenv` and the fallback Python setup fail, the script may offer **interactive guidance to help you install `pyenv`**. This involves cloning `pyenv` and requires you to manually update your shell configuration and re-run `setup.sh`.
+        *   If Python setup cannot be completed, the script will provide an error message and exit.
     *   **Virtual Environment Activation (for script):** Activates the `venv` *within the script's execution* to install packages correctly.
     *   **Dependency Installation:** Installs `Flask` and `openai-whisper` (and their dependencies) into `venv` using `pip` from the created virtual environment.
     *   **Guidance:** Provides clear instructions on how to manually activate `venv` in your terminal for running the application.
@@ -68,7 +70,7 @@ Before running the `setup.sh` script, ensure you have the following generally av
     ```
     *If you encounter a permission error, you might need to make the script executable first: `chmod +x setup.sh`*
 
-    **Important Note on Virtual Environment Activation:** The `setup.sh` script activates `venv` only for its own execution. Once the script finishes, `venv` will NOT be active in your terminal. You MUST activate it manually before running the application (see next section).
+    **Important Note on Virtual Environment Activation:** The `setup.sh` script activates `venv` only for its own execution. Once the script finishes (unless it exited early for you to configure `pyenv`), `venv` will NOT be active in your terminal. You MUST activate it manually before running the application (see next section).
 
 ## Preparing Your Audio Files
 
@@ -118,7 +120,7 @@ Before running the `setup.sh` script, ensure you have the following generally av
     source venv/bin/activate  # On macOS/Linux
     # For Windows: venv\Scripts\activate
     ```
-    Your terminal prompt will usually change to indicate that the `venv` is active. If `pyenv` was used during setup, this `venv` will be using the Python version specified by the `.python-version` file (e.g., `3.11.8`).
+    Your terminal prompt will usually change to indicate that the `venv` is active. If `pyenv` was used during setup, this `venv` will be using the Python version specified by the `.python-version` file (e.g., `3.11.4`).
 
 3.  **Run the Application:**
     With the `venv` active, start the server:
